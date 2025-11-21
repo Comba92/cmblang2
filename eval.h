@@ -153,6 +153,27 @@ void eval_block(Parser* p, IntVec stmts, SymbolTable* ctx) {
         break;
       }
 
+      case StmtTypeIfElse: {
+        StmtIfElse if_else = s->if_else;
+        Value cond = eval_expr(p, if_else.cond_idx, ctx);
+
+        if (cond.type != ValueTypeBool) {
+          fprintf(stderr, "[EVAL ERR] If condition isn't bool at expr id %ld\n", i); 
+          return;
+        }
+
+        int block_idx = cond.boolean ? if_else.if_idx : if_else.else_idx;
+
+        if (block_idx != -1) {
+          symtable_push_scope(ctx);
+          Stmt* block = parser_get_stmt(p, block_idx);
+          eval_block(p, block->block.stmt_ids, ctx);
+          symtable_pop_scope(ctx);
+        }
+
+        break;
+      }
+
       case StmtTypeExpr: {
         Value res = eval_expr(p, s->expr_idx, ctx);
         switch (res.type) {

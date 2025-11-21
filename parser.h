@@ -48,6 +48,7 @@ typedef enum {
   StmtTypeDecl,
   StmtTypeAssign,
   StmtTypeBlock,
+  StmtTypeIfElse,
 } StmtType;
 
 // forward declare Stmt and StmtVec, so we can build self referencing stmts such as StmtBlock
@@ -63,12 +64,19 @@ typedef struct {
   IntVec stmt_ids;
 } StmtBlock;
 
+typedef struct {
+  int cond_idx;
+  int if_idx;
+  int else_idx;
+} StmtIfElse;
+
 struct Stmt {
   StmtType type;
   union {
     StmtAssign decl;
     StmtAssign assign;
     StmtBlock block;
+    StmtIfElse if_else;
     int expr_idx;
   };
 };
@@ -133,7 +141,8 @@ typedef enum {
   UnclosedParen,
   UnclosedBlock,
   ExpectOperator,
-  BadLeftExpr,
+  ExpectBlock,
+  BadExpr,
   ExpectAssign,
   ExpectIdentifier,
 } ParseErr;
@@ -171,8 +180,8 @@ void parse_log_err(Parser* p, ParseErr err) {
       fprintf(stderr, "two consecutive expressions; expected operator");
       break;
       
-    case BadLeftExpr:
-      fprintf(stderr, "invalid lhs expression");
+    case BadExpr:
+      fprintf(stderr, "invalid expression");
       break;
 
     case ExpectAssign:
@@ -276,7 +285,7 @@ typedef struct {
 PrecLvl prefix_lvl(Token* op) {
   switch (op->type) {
     case TokSub: return PREC(0, 15);
-    case TokNot: return PREC(0, 16);
+    case TokNot: return PREC(0, 1);
     default: return PREC(-1,-1);
   }
 }
@@ -342,7 +351,7 @@ int parse_expr(Parser* p, int prec_lvl) {
       break;
 
     default:
-      parse_log_err(p, BadLeftExpr);
+      parse_log_err(p, BadExpr);
       return -1;
   }
 
@@ -389,7 +398,7 @@ int parse_decl(Parser* p) {
 int parse_stmt(Parser* p);
 int parse_block(Parser* p) {
   // eat '{'
-  parser_eat(p);
+  if (parser_eat_match(p, TokCurlyLeft, ExpectBlock) == NULL) return -1;
 
   IntVec stmt_ids = {0};
   while (!parser_is_at_end(p) && parser_peek(p)->type != TokCurlyRight) {
@@ -408,11 +417,29 @@ int parse_block(Parser* p) {
   return parser_push_stmt(p, (Stmt) {StmtTypeBlock, .block = {stmt_ids}});
 }
 
+int parse_if_else(Parser* p) {
+  // eat 'if'
+  parser_eat(p);
+  int expr_id = parse_expr(p, 0);
+  int if_id = parse_block(p);
+
+  int else_id = -1;
+  if (parser_peek(p)->type == TokElse) {
+    // eat 'else'
+    parser_eat(p);
+    else_id = parse_block(p);
+  }
+
+  StmtIfElse stmt = { .cond_idx = expr_id, .if_idx = if_id, .else_idx = else_id };
+  return parser_push_stmt(p, (Stmt) {StmtTypeIfElse, .if_else = stmt});
+}
+
 int parse_stmt(Parser* p) {
   // TODO: change to switch
   if (parser_peek(p)->type == TokVar) return parse_decl(p);
   else if (parser_peek(p)->type == TokIdent && parser_peek_nth(p, 1)->type == TokAssign) return parse_assign(p, false);
   else if (parser_peek(p)->type == TokCurlyLeft) return parse_block(p);
+  else if (parser_peek(p)->type == TokIf) return parse_if_else(p);
   else {
     // expression
     int id = parse_expr(p, 0);
