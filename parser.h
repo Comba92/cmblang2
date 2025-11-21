@@ -1,6 +1,6 @@
 #pragma once
+
 #include "common.h"
-#include "lexer.h"
 
 // TODO: consider storing indexes to Tokens instead of pointers
 
@@ -10,6 +10,17 @@ typedef enum {
   ExprTypeUnary,
   ExprTypeBinary,
 } ExprType;
+
+typedef enum {
+  LiteralTypeFloat = TokFloat,
+  LiteralTypeTrue = TokTrue,
+  LiteralTypeFalse = TokFalse,
+} LiteralType;
+
+typedef struct {
+  LiteralType type;
+  Token* tok;
+} ExprLiteral;
 
 typedef struct {
   TokenType op;
@@ -25,8 +36,8 @@ typedef struct {
 typedef struct {
   ExprType type;
   union {
-    // TODO: pointer to token here
-    Token* tok;
+    ExprLiteral lit;
+    Token* ident;
     ExprUnary un;
     ExprBinary bin;
   };
@@ -64,12 +75,13 @@ struct Stmt {
 
 VEC_DEF(Expr);
 
-Expr literal(Token* num) {
-  return (Expr) { ExprTypeLiteral, .tok = num };
+Expr literal(Token* t) {
+  ExprLiteral lit = (ExprLiteral) {(LiteralType) t->type, t};
+  return (Expr) { ExprTypeLiteral, .lit = lit };
 }
 
 Expr variable(Token* t) {
-  return (Expr) { ExprTypeVariable, .tok = t };
+  return (Expr) { ExprTypeVariable, .ident = t };
 }
 
 Expr unary(Token* op, int rhs) {
@@ -264,6 +276,7 @@ typedef struct {
 PrecLvl prefix_lvl(Token* op) {
   switch (op->type) {
     case TokSub: return PREC(0, 15);
+    case TokNot: return PREC(0, 16);
     default: return PREC(-1,-1);
   }
 }
@@ -272,10 +285,14 @@ PrecLvl infix_lvl(Token* op) {
   switch (op->type) {
     case TokAdd:
     case TokSub:
-      return PREC(9,9);
+      return PREC(2,3);
     case TokMul:
     case TokDiv:
-      return PREC(10,10);
+      return PREC(4,5);
+    case TokAnd:
+      return PREC(8,9);
+    case TokOr:
+      return PREC(6,7);
     case TokExp:
       return PREC(11,12);
     case TokRem: 
@@ -288,7 +305,7 @@ PrecLvl infix_lvl(Token* op) {
 PrecLvl postfix_lvl(Token* op) {
   switch (op->type) {
     default: return PREC(-1,-1);
-  }  
+  }
 }
 
 // https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
@@ -299,7 +316,9 @@ int parse_expr(Parser* p, int prec_lvl) {
   // parse lhs
   int lhs;
   switch (t->type) {
-    case TokNumber:
+    case TokFloat:
+    case TokTrue:
+    case TokFalse:
       lhs = parser_push_expr(p, literal(t));
       break;
 
@@ -308,6 +327,7 @@ int parse_expr(Parser* p, int prec_lvl) {
       break;
 
     case TokSub:
+    case TokNot:
       PrecLvl lvl = prefix_lvl(t);
       int rhs = parse_expr(p, lvl.right);
       lhs = parser_push_expr(p, unary(t, rhs));
@@ -330,7 +350,7 @@ int parse_expr(Parser* p, int prec_lvl) {
     if (parser_is_at_end(p)) break;
 
     Token* op = parser_peek(p);
-    if (token_is_not_op(op)) break;
+    if (!tok_is_op(op)) break;
 
     // postfix operator goes there
 
@@ -381,8 +401,6 @@ int parse_block(Parser* p) {
     parse_log_err(p, UnclosedBlock);
     return -1;
   }
-
-  // parser_eat_match(p, TokCurlyRight, UnclosedBlock);
 
   // we are sure to have reached a '}', we would have reached end of tokens otherwise
   // eat '}'

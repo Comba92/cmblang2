@@ -1,17 +1,27 @@
 #pragma once
-
-#include <string.h>
 #include "common.h"
 
 typedef enum {
-  ValueTypeErr,
-  ValueTypeFloat,
+  ValueTypeBool = 0,
+  ValueTypeFloat = 1,
 } ValueType;
 
 typedef struct {
+  ValueType kind;
+} Type;
+VEC_DEF(Type);
+
+typedef struct {
   ValueType type;
-  double num;
+  union {
+    bool boolean;
+    double num;
+  };
 } Value;
+
+Value val_err() {
+  return (Value) { .type = -1 };
+}
 
 typedef struct {
   char* name;
@@ -23,12 +33,18 @@ VEC_DEF(Scope);
 
 typedef struct {
   ScopeVec scopes;
+  TypeVec types;
 } SymbolTable;
 
-void symtable_insert(SymbolTable* table, int depth, char* str, size_t len, Value val) {
-  while (table->scopes.len <= depth) VEC_PUSH(table->scopes, (Scope) {0});
+// TODO: should be pointer?
+// Type symtable_get_type(SymbolTable* table, int idx) {
+//   return table->types.data[idx];
+// }
 
-  Scope* scope = &table->scopes.data[depth];
+void symtable_insert(SymbolTable* table, char* str, size_t len, Value val) {
+  // while (table->scopes.len <= depth) VEC_PUSH(table->scopes, (Scope) {0});
+
+  Scope* scope = &table->scopes.data[table->scopes.len-1];
 
   int present = -1;
   VEC_FOR(*scope) {
@@ -44,19 +60,19 @@ void symtable_insert(SymbolTable* table, int depth, char* str, size_t len, Value
     char* name = str_clone(str, len);
     Symbol e = { name, val };
     VEC_PUSH(*scope, e);
-    printf("Value pushed to scope %d: %lf\n", depth, val.num);
+    printf("Value pushed to scope: %lf\n", val.num);
   } else {
     scope->data[present].val = val;
-    printf("Value updated to scope %d: %lf\n", depth, val.num);
+    printf("Value updated to scope: %lf\n",val.num);
   }
 }
 
-Value* symtable_find(SymbolTable* table, int depth, char* str, size_t len) {
-  while (table->scopes.len <= depth) VEC_PUSH(table->scopes, (Scope) {0});
+Value* symtable_find(SymbolTable* table, char* str, size_t len) {
+  // while (table->scopes.len <= depth) VEC_PUSH(table->scopes, (Scope) {0});
 
   Symbol* present = NULL;
 
-  for(int i=depth; i >= 0; i--) {
+  for(int i=table->scopes.len-1; i >= 0; i--) {
     Scope* scope = &table->scopes.data[i];
 
     VEC_FOREACH(Symbol, *scope) {
@@ -81,9 +97,15 @@ void symtable_push_scope(SymbolTable* table) {
 void symtable_pop_scope(SymbolTable* table) {
   Scope* scope = &table->scopes.data[table->scopes.len-1];
   free(scope->data);
-  (void) VEC_POP(*scope);
+  (void) VEC_POP(table->scopes);
 }
 
-void table_dbg(SymbolTable* table) {
-  
+SymbolTable symtable_init() {
+  SymbolTable t = {0};
+  symtable_push_scope(&t);
+
+  VEC_PUSH(t.types, (Type) {ValueTypeBool});
+  VEC_PUSH(t.types, (Type) {ValueTypeFloat});
+
+  return t;
 }

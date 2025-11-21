@@ -11,18 +11,48 @@ typedef enum {
   TokBraceRight = ']',
   TokCurlyLeft = '{',
   TokCurlyRight = '}',
-  TokNumber = 'n',
-  TokIdent = 'i',
   TokAdd = '+',
   TokMul = '*',
   TokSub = '-',
   TokDiv = '/',
   TokRem = '%',
   TokExp = '^',
-  TokVar = 'v',
   TokAssign = '=',
+  TokBang = '!',
+  TokGreat = '>',
+  TokLess = '<',
+
+  TokAnd = '&',
+  TokOr = '|',
+  TokNot = '~',
+
+  TokFloat = 'n',
+  TokIdent = 'i',
+
+  TokVar = 'v',
+  TokTrue = 't',
+  TokFalse = 'f',
+  TokIf,
+  TokElse,
 } TokenType;
 
+typedef struct {
+  const char* name;
+  size_t len; 
+  TokenType type;
+} KeywordData;
+
+static const KeywordData KEYWORDS[] = {
+  { "var",    sizeof("var"),    TokVar },
+  { "true",   sizeof("true"),   TokTrue },
+  { "false",  sizeof("false"),  TokFalse },
+  { "and",    sizeof("and"),    TokAnd },
+  { "or",     sizeof("or"),     TokOr },
+  { "not",    sizeof("not"),    TokNot },
+  { "if",     sizeof("if"),     TokIf },
+  { "else",   sizeof("else"),   TokElse },
+};
+const size_t KEYWORDS_LEN = sizeof(KEYWORDS) / sizeof(KeywordData);
 
 typedef struct {
   TokenType type;
@@ -38,8 +68,18 @@ Token token_sym(char c, int offset) {
   return (Token) { (TokenType) c,  offset, 1 };
 }
 
-int token_is_not_op(Token* t) {
-  return t->type == TokVar || t->type == TokAssign || t->type == TokNumber || t->type == TokIdent;
+int tok_is_op(Token* t) {
+  return t->type == TokParenLeft
+    || t->type == TokParenRight
+    || t->type == TokAdd
+    || t->type == TokMul
+    || t->type == TokSub
+    || t->type == TokDiv
+    || t->type == TokRem
+    || t->type == TokExp
+    || t->type == TokAnd
+    || t->type == TokOr
+    || t->type == TokNot;
 }
 
 void token_dbg(TokenVec tokens, int idx) {
@@ -80,6 +120,8 @@ TokenVec tokenize(char* str) {
       case '%':
       case '^':
       case '=':
+      case '>':
+      case '<':
         t = token_sym(c, column);
         break;
 
@@ -95,13 +137,20 @@ TokenVec tokenize(char* str) {
             while (str[len] != '\0' && isdigit(str[len])) len++;
           }
           
-          t = (Token) {TokNumber, column, len};
+          t = (Token) {TokFloat, column, len};
         } else if (isalpha(c)) {
+          bool is_keyword = false;
           // keywords
-          if (strncmp(str, "var", 3) == 0) {
-            t = (Token) {TokVar, column, 3};
-            break;
+          for (size_t i=0; i<KEYWORDS_LEN; i++) {
+            KeywordData keyword = KEYWORDS[i];
+            if (strncmp(str, keyword.name, keyword.len-1) == 0) {
+              t = (Token) {keyword.type, column, keyword.len-1};
+              is_keyword = true;
+              break;
+            }
           }
+          
+          if (is_keyword) break;
 
           // not a keyword, must be an ident
           int len = 1;
