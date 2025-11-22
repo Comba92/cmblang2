@@ -49,6 +49,7 @@ typedef enum {
   StmtTypeAssign,
   StmtTypeBlock,
   StmtTypeIfElse,
+  StmtTypeWhile,
 } StmtType;
 
 // forward declare Stmt and StmtVec, so we can build self referencing stmts such as StmtBlock
@@ -70,6 +71,11 @@ typedef struct {
   int else_idx;
 } StmtIfElse;
 
+typedef struct {
+  int cond_idx;
+  int block_idx;
+} StmtWhile;
+
 struct Stmt {
   StmtType type;
   union {
@@ -77,6 +83,7 @@ struct Stmt {
     StmtAssign assign;
     StmtBlock block;
     StmtIfElse if_else;
+    StmtWhile wloop;
     int expr_idx;
   };
 };
@@ -284,8 +291,8 @@ typedef struct {
 
 PrecLvl prefix_lvl(Token* op) {
   switch (op->type) {
-    case TokSub: return PREC(0, 15);
-    case TokNot: return PREC(0, 1);
+    case TokSub: return PREC(0, 26);
+    case TokNot: return PREC(0, 25);
     default: return PREC(-1,-1);
   }
 }
@@ -294,18 +301,26 @@ PrecLvl infix_lvl(Token* op) {
   switch (op->type) {
     case TokAdd:
     case TokSub:
-      return PREC(2,3);
+      return PREC(12,13);
+    case TokEq:
+    case TokNotEq:
+      return PREC(8,9);
+    case TokGreat:
+    case TokGreatEq:
+    case TokLess:
+    case TokLessEq:
+      return PREC(10, 11);
     case TokMul:
     case TokDiv:
-      return PREC(4,5);
+      return PREC(14,15);
     case TokAnd:
-      return PREC(8,9);
+      return PREC(18,19);
     case TokOr:
-      return PREC(6,7);
+      return PREC(16,17);
     case TokExp:
-      return PREC(11,12);
+      return PREC(21,22);
     case TokRem: 
-      return PREC(14,14);
+      return PREC(23,24);
 
     default: return PREC(-1,-1);
   }
@@ -392,7 +407,7 @@ int parse_assign(Parser* p, bool declaration) {
 int parse_decl(Parser* p) {
   // eat var keyword
   parser_eat(p);
-  return parse_assign(p, 1);
+  return parse_assign(p, true);
 }
 
 int parse_stmt(Parser* p);
@@ -434,16 +449,32 @@ int parse_if_else(Parser* p) {
   return parser_push_stmt(p, (Stmt) {StmtTypeIfElse, .if_else = stmt});
 }
 
+int parse_while(Parser* p) {
+  // eat 'while'
+  parser_eat(p);
+  int expr_id = parse_expr(p, 0);
+  int while_id = parse_block(p);
+
+  StmtWhile stmt = { .cond_idx = expr_id, .block_idx = while_id };
+  return parser_push_stmt(p, (Stmt) {StmtTypeWhile, .wloop = stmt});
+}
+
 int parse_stmt(Parser* p) {
-  // TODO: change to switch
-  if (parser_peek(p)->type == TokVar) return parse_decl(p);
-  else if (parser_peek(p)->type == TokIdent && parser_peek_nth(p, 1)->type == TokAssign) return parse_assign(p, false);
-  else if (parser_peek(p)->type == TokCurlyLeft) return parse_block(p);
-  else if (parser_peek(p)->type == TokIf) return parse_if_else(p);
-  else {
-    // expression
-    int id = parse_expr(p, 0);
-    return parser_push_stmt(p, (Stmt) {StmtTypeExpr, .expr_idx = id});
+  switch(parser_peek(p)->type) {
+    case TokVar: return parse_decl(p);
+    case TokCurlyLeft: return parse_block(p);
+    case TokIf: return parse_if_else(p);
+    case TokWhile: return parse_while(p);
+
+    default: {
+      if (parser_peek(p)->type == TokIdent && parser_peek_nth(p, 1)->type == TokAssign)
+        return parse_assign(p, false);
+      else {
+        // expression
+        int id = parse_expr(p, 0);
+        return parser_push_stmt(p, (Stmt) {StmtTypeExpr, .expr_idx = id});
+      }
+    }
   }
 }
 

@@ -81,6 +81,8 @@ Value* symtable_find(SymbolTable* table, char* str, size_t len) {
         break;
       }
     }
+
+    if (present != NULL) break;
   }
 
   if (present == NULL) {
@@ -102,6 +104,7 @@ void symtable_pop_scope(SymbolTable* table) {
 
 SymbolTable symtable_init() {
   SymbolTable t = {0};
+  // global scope
   symtable_push_scope(&t);
 
   VEC_PUSH(t.types, (Type) {ValueTypeBool});

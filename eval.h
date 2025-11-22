@@ -81,9 +81,32 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
       }
 
       Value v = {0};
-      v.type = lhs.type;
       switch (lhs.type) {
         case ValueTypeFloat: {
+          switch(bin.op) {
+            case TokAdd:
+            case TokSub:
+            case TokMul:
+            case TokDiv:
+            case TokRem:
+            case TokExp:
+              v.type = ValueTypeFloat;
+              break;
+
+            case TokEq:     
+            case TokNotEq:
+            case TokGreat:
+            case TokLess:
+            case TokGreatEq:
+            case TokLessEq:
+              v.type = ValueTypeBool;
+              break;
+
+            default:
+              fprintf(stderr, "[EVAL ERR] Invalid numeric binary operator at expr id %d\n", expr_id); 
+              return val_err();
+          }
+
           switch(bin.op) {
             case TokAdd: v.num = lhs.num + rhs.num; break;
             case TokSub: v.num = lhs.num - rhs.num; break;
@@ -91,6 +114,14 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
             case TokDiv: v.num = lhs.num / rhs.num; break;
             case TokRem: v.num = fmod(lhs.num, rhs.num); break;
             case TokExp: v.num = pow(lhs.num, rhs.num); break;
+
+            case TokEq:       v.boolean = lhs.num == rhs.num; break;
+            case TokNotEq:    v.boolean = lhs.num != rhs.num; break;
+            case TokGreat:    v.boolean = lhs.num >  rhs.num; break;
+            case TokLess:     v.boolean = lhs.num <  rhs.num; break;
+            case TokGreatEq:  v.boolean = lhs.num >= rhs.num; break;
+            case TokLessEq:   v.boolean = lhs.num <= rhs.num; break;
+
             default:
               fprintf(stderr, "[EVAL ERR] Invalid numeric binary operator at expr id %d\n", expr_id); 
               return val_err();
@@ -100,9 +131,17 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
         }
 
         case ValueTypeBool: {
+          v.type = ValueTypeBool;
+
           switch(bin.op) {
             case TokAnd: v.boolean = lhs.boolean && rhs.boolean; break;
             case TokOr: v.boolean = lhs.boolean || rhs.boolean; break;
+            case TokEq:       v.boolean = lhs.boolean == rhs.boolean; break;
+            case TokNotEq:    v.boolean = lhs.boolean != rhs.boolean; break;
+            case TokGreat:    v.boolean = lhs.boolean >  rhs.boolean; break;
+            case TokLess:     v.boolean = lhs.boolean <  rhs.boolean; break;
+            case TokGreatEq:  v.boolean = lhs.boolean >= rhs.boolean; break;
+            case TokLessEq:   v.boolean = lhs.boolean <= rhs.boolean; break;
             default:
               fprintf(stderr, "[EVAL ERR] Invalid bool binary operator at expr id %d\n", expr_id); 
               return val_err();
@@ -128,8 +167,7 @@ void eval_block(Parser* p, IntVec stmts, SymbolTable* ctx) {
         Value val = eval_expr(p, s->assign.rhs_idx, ctx);
 
         symtable_insert(ctx, start, len, val);
-        break;
-      }
+      } break;
 
       case StmtTypeAssign: {
         char* start = p->src + s->decl.tok->offset;
@@ -140,18 +178,15 @@ void eval_block(Parser* p, IntVec stmts, SymbolTable* ctx) {
           fprintf(stderr, "[EVAL ERR] Undeclared variable at expr id %ld\n", i); 
           return;
         } else {
-          Value res = eval_expr(p, s->decl.rhs_idx, ctx);
-          symtable_insert(ctx, start, len, res);
+          *res = eval_expr(p, s->decl.rhs_idx, ctx);
         }
-        break;
-      }
+      } break;
 
       case StmtTypeBlock: {
         symtable_push_scope(ctx);
         eval_block(p, s->block.stmt_ids, ctx);
         symtable_pop_scope(ctx);
-        break;
-      }
+      } break;
 
       case StmtTypeIfElse: {
         StmtIfElse if_else = s->if_else;
@@ -170,9 +205,25 @@ void eval_block(Parser* p, IntVec stmts, SymbolTable* ctx) {
           eval_block(p, block->block.stmt_ids, ctx);
           symtable_pop_scope(ctx);
         }
+      } break;
 
-        break;
-      }
+      case StmtTypeWhile: {
+        StmtWhile wloop = s->wloop;
+        Value cond = eval_expr(p, wloop.cond_idx, ctx);
+        if (cond.type != ValueTypeBool) {
+          fprintf(stderr, "[EVAL ERR] While condition isn't bool at expr id %ld\n", i); 
+          return;
+        }
+
+        Stmt* block = parser_get_stmt(p, wloop.block_idx);
+        while (cond.boolean) {
+          symtable_push_scope(ctx);
+          eval_block(p, block->block.stmt_ids, ctx);
+          symtable_pop_scope(ctx);
+
+          cond = eval_expr(p, wloop.cond_idx, ctx);
+        }
+      } break;
 
       case StmtTypeExpr: {
         Value res = eval_expr(p, s->expr_idx, ctx);
