@@ -56,6 +56,13 @@ char* str_clone(char* str, size_t len) {
   return res;
 }
 
+void string_append(String* sb, char* sv) {
+  while (*sv != '\0') {
+    VEC_PUSH(*sb, *sv);
+    sv++;
+  }
+}
+
 char* file_read_to_string(char* path) {
   FILE* f = fopen(path, "rb");
   if (f == NULL) return NULL;

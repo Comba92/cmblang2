@@ -43,11 +43,13 @@ typedef enum {
   TokArrow,
   Tok2Colon,
   TokDecl,
+  Tok2Dot,
+  Tok2Slash,
   
   TokFloat,
   TokIdent,
 
-  TokVar,
+  // TokVar,
   TokTrue,
   TokFalse,
   TokIf,
@@ -57,6 +59,7 @@ typedef enum {
   TokFn,
   TokReturn,
   TokStruct,
+  TokAs,
 } TokenType;
 
 typedef struct {
@@ -66,7 +69,7 @@ typedef struct {
 } KeywordData;
 
 static const KeywordData KEYWORDS[] = {
-  { "var",    sizeof("var"),    TokVar },
+  // { "var",    sizeof("var"),    TokVar },
   { "true",   sizeof("true"),   TokTrue },
   { "false",  sizeof("false"),  TokFalse },
   { "and",    sizeof("and"),    TokAnd },
@@ -79,6 +82,7 @@ static const KeywordData KEYWORDS[] = {
   { "fn",     sizeof("fn"),     TokFn },
   { "return", sizeof("return"), TokReturn },
   { "struct", sizeof("struct"), TokStruct },
+  { "as",     sizeof("as"),     TokAs },
 };
 const size_t KEYWORDS_LEN = sizeof(KEYWORDS) / sizeof(KeywordData);
 
@@ -92,7 +96,7 @@ VEC_DEF(Token);
 
 static Token TOKEN_ERR = { TokErr, -1, -1 };
 
-Token tok(char c, int offset) {
+Token tok_sym(char c, int offset) {
   return (Token) { (TokenType) c,  offset, 1 };
 }
 
@@ -102,9 +106,9 @@ Token tok_sym2(TokenType c, int offset) {
 
 int tok_is_op(Token* t) {
   return t->type == TokParenLeft
-    || t->type == TokParenRight
+    // || t->type == TokParenRight
     || t->type == TokBraceLeft
-    || t->type == TokBraceRight
+    // || t->type == TokBraceRight
     || t->type == TokAdd
     || t->type == TokMul
     || t->type == TokSub
@@ -168,10 +172,8 @@ TokenVec tokenize(char* str) {
       case '}':
       case '+':
       case '*':
-      case '/':
       case '%':
       case '^':
-      case '.':
       case ',':
       case ';':
       case '\'':
@@ -182,6 +184,8 @@ TokenVec tokenize(char* str) {
         t = tok_sym(c, column);
         break;
 
+      case '/': t = lexer_match_or(str, '/', column, Tok2Slash, TokDiv); break;
+      case '.': t = lexer_match_or(str, '.', column, Tok2Dot, TokDot); break;
       case '-': t = lexer_match_or(str, '>', column, TokArrow, TokSub); break;
       case '=': t = lexer_match_or(str, '=', column, TokEq, TokAssign); break;
       case '<': t = lexer_match_or(str, '=', column, TokLessEq, TokLess); break;
@@ -189,8 +193,8 @@ TokenVec tokenize(char* str) {
       case '!': t = lexer_match_or(str, '=', column, TokNotEq, TokBang); break;
       case ':': {
         char next = *(str + 1);
-        if (next == ':') t = tok_sym(Tok2Colon, column);
-        else if (next == '=') t = tok_sym(TokDecl, column);
+        if (next == ':') t = tok_sym2(Tok2Colon, column);
+        else if (next == '=') t = tok_sym2(TokDecl, column);
         else t = tok_sym('.', column);
       }; break;
 

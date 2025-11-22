@@ -17,9 +17,9 @@ int main() {
     stdin_read_line(buf, BUF_SIZE);
 
     parse(&parser, buf);
-    VEC_FOR(parser.tokens) token_dbg(parser.tokens, i);
-    VEC_FOR(parser.exprs) expr_dbg(parser.exprs, i);
-    VEC_FOR(parser.stmts) stmt_dbg(parser.stmts, i);
+    // VEC_FOR(parser.tokens) token_dbg(parser.tokens, i);
+    // VEC_FOR(parser.exprs) expr_dbg(parser.exprs, i);
+    // VEC_FOR(parser.stmts) stmt_dbg(parser.stmts, i);
 
     if (parser.err == ErrNone) {
       eval(&parser, &ctx);
