@@ -2,12 +2,13 @@
 #include "common.h"
 
 typedef enum {
-  ValueTypeBool = 0,
-  ValueTypeFloat = 1,
-  ValueTypeArray,
-  ValueTypeStruct,
-  ValueTypeFunc,
-} ValueType;
+  ValueKindBool = 0,
+  ValueKindInt = 1,
+  ValueKindFloat = 2,
+  ValueKindArray,
+  ValueKindStruct,
+  ValueKindFunc,
+} ValueKind;
 
 typedef struct {
   IntVec fields_ids;
@@ -18,7 +19,7 @@ typedef struct {
 } TypeFunc;
 
 typedef struct {
-  ValueType type;
+  ValueKind kind;
   char* name;
   union {
     int subtype_idx;
@@ -26,19 +27,23 @@ typedef struct {
 } Type;
 VEC_DEF(Type);
 
-typedef struct {
-  int len;
-  void* data;
-} ValueArray;
+typedef struct Value Value;
+VEC_DEF(Value);
 
 typedef struct {
+  int len;
+  Value* data;
+} ValueArray;
+
+struct Value {
   int type_idx;
   union {
-    double num;
+    int integer;
+    double floating;
     bool boolean;
     ValueArray arr;
   };
-} Value;
+};
 
 Value val_err() {
   return (Value) { .type_idx = -1 };
@@ -55,16 +60,29 @@ VEC_DEF(Scope);
 typedef struct {
   ScopeVec scopes;
   TypeVec types;
-} SymbolTable;
+} SymTbl;
 
-Type* symtable_get_val_type(SymbolTable* table, Value* val) {
-  return &table->types.data[val->type_idx];
+// int symtbl_push_val(SymTbl* tbl, Value val) {
+//   VEC_PUSH(tbl->values, val);
+//   return tbl->values.len-1;
+// }
+
+// Value* symtbl_get_val(SymTbl* tbl, int idx) {
+//   return &tbl->values.data[idx];
+// }
+
+Type* symtbl_get_val_type(SymTbl* tbl, Value* val) {
+  return &tbl->types.data[val->type_idx];
 }
 
-int symtable_insert_type(SymbolTable* table, Type t) {
+// Type* symtbl_get_val_id_type(SymTbl* tbl, int val_idx) {
+//   return symtbl_get_val_type(tbl, symtbl_get_val(tbl, val_idx)); 
+// }
+
+int symtbl_insert_type(SymTbl* tbl, Type t) {
   int present = -1;
-  VEC_FOR(table->types) {
-    Type* type = &table->types.data[i];
+  VEC_FOR(tbl->types) {
+    Type* type = &tbl->types.data[i];
     if (strcmp(type->name, t.name) == 0) {
       present = i;
       break;
@@ -72,43 +90,47 @@ int symtable_insert_type(SymbolTable* table, Type t) {
   }
 
   if (present == -1) {
-    VEC_PUSH(table->types, t);
-    return table->types.len-1;
+    VEC_PUSH(tbl->types, t);
+    return tbl->types.len-1;
   } else {
     free(t.name);
     return present;
   }
 }
 
-bool symtable_type_eq(SymbolTable* table, Value* a, Value* b) {
+bool symtbl_type_eq(SymTbl* tbl, Value* a, Value* b) {
   // TODO: for now this will do...
-  Type* at = symtable_get_val_type(table, a);
-  Type* bt = symtable_get_val_type(table, b);
+  Type* at = symtbl_get_val_type(tbl, a);
+  Type* bt = symtbl_get_val_type(tbl, b);
   return strcmp(at->name, bt->name) == 0;
 }
 
+Value make_int_value(double val) {
+  return (Value) { ValueKindInt, .integer = val };
+}
+
 Value make_float_value(double val) {
-  return (Value) { ValueTypeFloat, .num = val };
+  return (Value) { ValueKindFloat, .floating = val };
 }
 
 Value make_bool_value(bool val) {
-  return (Value) { ValueTypeBool, .boolean = val };
+  return (Value) { ValueKindBool, .boolean = val };
 }
 
-Value make_arr_value(SymbolTable* table, int subtype, void* data, int len) {
-  char* subtype_name = table->types.data[subtype].name;
+Value make_arr_value(SymTbl* tbl, int subtype, void* data, int len) {
+  char* subtype_name = tbl->types.data[subtype].name;
 
   String name = {0};
   string_append(&name, "arr ");
   string_append(&name, subtype_name);
 
-  Type t = { ValueTypeArray, name.data, .subtype_idx = subtype };
-  int type_idx = symtable_insert_type(table, t);
+  Type t = { ValueKindArray, name.data, .subtype_idx = subtype };
+  int type_idx = symtbl_insert_type(tbl, t);
   return (Value) { type_idx, .arr = { len, data }};
 }
 
-void symtable_insert(SymbolTable* table, char* str, size_t len, Value val) {
-  Scope* scope = &table->scopes.data[table->scopes.len-1];
+void symtbl_insert(SymTbl* tbl, char* str, size_t len, Value val) {
+  Scope* scope = &tbl->scopes.data[tbl->scopes.len-1];
 
   int present = -1;
   VEC_FOR(*scope) {
@@ -129,11 +151,12 @@ void symtable_insert(SymbolTable* table, char* str, size_t len, Value val) {
   }
 }
 
-Value* symtable_find(SymbolTable* table, char* str, size_t len) {
+// TODO: consider making this return index
+Value* symtbl_find(SymTbl* tbl, char* str, size_t len) {
   Symbol* present = NULL;
 
-  for(int i=table->scopes.len-1; i >= 0; i--) {
-    Scope* scope = &table->scopes.data[i];
+  for(int i=tbl->scopes.len-1; i >= 0; i--) {
+    Scope* scope = &tbl->scopes.data[i];
 
     VEC_FOREACH(Symbol, *scope) {
       if (strncmp(it->name, str, len) == 0) {
@@ -152,29 +175,31 @@ Value* symtable_find(SymbolTable* table, char* str, size_t len) {
   }
 }
 
-void symtable_push_scope(SymbolTable* table) {
-  VEC_PUSH(table->scopes, (Scope) {0});
+void symtbl_push_scope(SymTbl* tbl) {
+  VEC_PUSH(tbl->scopes, (Scope) {0});
 }
 
-void symtable_pop_scope(SymbolTable* table) {
-  Scope* scope = &table->scopes.data[table->scopes.len-1];
+void symtbl_pop_scope(SymTbl* tbl) {
+  Scope* scope = &tbl->scopes.data[tbl->scopes.len-1];
   free(scope->data);
   // scope->len = 0;
-  (void) VEC_POP(table->scopes);
+  (void) VEC_POP(tbl->scopes);
 }
 
-const Type TYPE_BOOL  = {ValueTypeBool,  "bool", 0};
-const Type TYPE_FLOAT = {ValueTypeFloat, "float", 0};
+const Type TYPE_BOOL  = {ValueKindBool,  "bool", 0};
+const Type TYPE_INT   = {ValueKindInt, "int", 0};
+const Type TYPE_FLOAT = {ValueKindFloat, "float", 0};
 
-SymbolTable symtable_init() {
-  SymbolTable t = {0};
+SymTbl symtbl_init() {
+  SymTbl t = {0};
   // global scope
-  symtable_push_scope(&t);
+  symtbl_push_scope(&t);
 
   VEC_PUSH(t.types, TYPE_BOOL);
+  VEC_PUSH(t.types, TYPE_INT);
   VEC_PUSH(t.types, TYPE_FLOAT);
 
   return t;
 }
 
-// TODO: free symtable
+// TODO: free symtbl

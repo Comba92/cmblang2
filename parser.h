@@ -5,25 +5,26 @@
 // TODO: consider storing indexes to Tokens instead of pointers
 
 typedef enum {
-  ExprTypeLiteral,
-  ExprTypeVariable,
-  ExprTypeUnary,
-  ExprTypeBinary,
-} ExprType;
+  ExprKindLiteral,
+  ExprKindVariable,
+  ExprKindUnary,
+  ExprKindBinary,
+} ExprKind;
 
 typedef enum {
-  LiteralTypeFloat = TokFloat,
-  LiteralTypeTrue = TokTrue,
-  LiteralTypeFalse = TokFalse,
-  LiteralTypeArray = TokBraceLeft,
-} LiteralType;
+  LiteralKindInt = TokInt,
+  LiteralKindFloat = TokFloat,
+  LiteralKindTrue = TokTrue,
+  LiteralKindFalse = TokFalse,
+  LiteralKindArray = TokBraceLeft,
+} LiteralKind;
 
 typedef struct {
-  IntVec vals;
+  IntVec expr_ids;
 } LiteralArray;
 
 typedef struct {
-  LiteralType type;
+  LiteralKind kind;
   union {
     Token* tok;
     LiteralArray arr;
@@ -31,18 +32,18 @@ typedef struct {
 } ExprLiteral;
 
 typedef struct {
-  TokenType op;
+  TokenKind op;
   int expr;
 } ExprUnary;
 
 typedef struct {
   int lhs_idx;
-  TokenType op;
+  TokenKind op;
   int rhs_idx;
 } ExprBinary;
 
 typedef struct {
-  ExprType type;
+  ExprKind kind;
   union {
     ExprLiteral lit;
     Token* ident;
@@ -52,17 +53,23 @@ typedef struct {
 } Expr;
 
 typedef enum {
-  StmtTypeExpr,
-  StmtTypeDecl,
-  StmtTypeAssign,
-  StmtTypeBlock,
-  StmtTypeIfElse,
-  StmtTypeWhile,
-} StmtType;
+  StmtKindExpr,
+  StmtKindDecl,
+  StmtKindAssign,
+  StmtKindBlock,
+  StmtKindIfElse,
+  StmtKindWhile,
+} StmtKind;
 
 // forward declare Stmt and StmtVec, so we can build self referencing stmts such as StmtBlock
 typedef struct Stmt Stmt;
 VEC_DEF(Stmt);
+
+typedef struct {
+  Token* name;
+  // TODO: type here
+  int rhs_idx;
+} StmtDecl;
 
 typedef struct {
   Token* tok;
@@ -85,7 +92,7 @@ typedef struct {
 } StmtWhile;
 
 struct Stmt {
-  StmtType type;
+  StmtKind kind;
   union {
     StmtAssign decl;
     StmtAssign assign;
@@ -100,15 +107,15 @@ VEC_DEF(Expr);
 
 void expr_dbg(ExprVec exprs, int idx) {
   Expr* e = &exprs.data[idx];
-  printf("[EXPR %d] type = %d ", idx, e->type);
+  printf("[EXPR %d] kind = %d ", idx, e->kind);
 
-  switch(e->type) {
-    case ExprTypeLiteral: printf("literal\n"); break;
-    case ExprTypeVariable: printf("variable\n"); break;
-    case ExprTypeUnary:
+  switch(e->kind) {
+    case ExprKindLiteral: printf("literal\n"); break;
+    case ExprKindVariable: printf("variable\n"); break;
+    case ExprKindUnary:
       printf("op = %c, rhs = %d\n", e->un.op, e->un.expr);
       break;
-    case ExprTypeBinary: 
+    case ExprKindBinary: 
       printf("lhs = %d, op = %c, rhs = %d\n", e->bin.lhs_idx, e->bin.op, e->bin.rhs_idx);
       break;
     default: break; 
@@ -117,23 +124,8 @@ void expr_dbg(ExprVec exprs, int idx) {
 
 void stmt_dbg(StmtVec stmts, int idx) {
   Stmt* s = &stmts.data[idx];
-  printf("[STMT %d] type = %d\n", idx, s->type);
+  printf("[STMT %d] kind = %d\n", idx, s->kind);
 }
-
-typedef enum {
-  ErrNone = 0,
-  NoTokens,
-  BadToken,
-  UnclosedParen,
-  UnclosedBlock,
-  UnclosedBrace,
-  ExpectOperator,
-  ExpectCommaOrBraceClose,
-  ExpectBlock,
-  BadExpr,
-  ExpectAssign,
-  ExpectIdentifier,
-} ParseErr;
 
 typedef struct  {
   char* src;
@@ -145,57 +137,17 @@ typedef struct  {
   StmtVec stmts;
   IntVec top_lvl_stmts;
   
-  ParseErr err;
+  const char* err;
 } Parser;
 
 // TODO: refactor this
-void parse_log_err(Parser* p, ParseErr err) {
+void parse_log_err(Parser* p, const char* err) {
   p->err = err;
-  
-  fprintf(stderr, "[PARSE ERR] ");
-  switch (p->err) {
-    case BadToken:
-      break;
-    
-    case UnclosedParen:
-      fprintf(stderr, "unclosed parenthesis");  
-      break;
-
-    case UnclosedBlock:
-      fprintf(stderr, "unclosed block parenthesis");  
-      break;
-
-    case ExpectOperator:
-      fprintf(stderr, "two consecutive expressions; expected operator");
-      break;
-      
-    case BadExpr:
-      fprintf(stderr, "invalid expression");
-      break;
-
-    case ExpectAssign:
-      fprintf(stderr, "expected '=' token");
-      break;
-
-    case ExpectIdentifier:
-      fprintf(stderr, "expected identifier token after 'var' keyword");
-      break;
-
-    case ExpectCommaOrBraceClose:
-      fprintf(stderr, "expected comma or brace closing in array literal");
-      break;
-
-    case UnclosedBrace:
-      fprintf(stderr, "unclosed brace");
-      break;
-      
-    default: fprintf(stderr, "unhandled error\n"); return;
-  }
   
   int token_id = p->curr_token-1;
   Token* t = &p->tokens.data[token_id];
   int column = t->offset;
-  fprintf(stderr, " at token %d (type = %c), column %d\n", token_id, t->type, column);
+  fprintf(stderr, "[PARSE ERR] %s at token %d (type = %c), column %d\n", err, token_id, t->kind, column);
 }
 
 int parser_push_expr(Parser* p, Expr e) {
@@ -225,9 +177,9 @@ Token* parser_eat(Parser* p) {
   return &p->tokens.data[p->curr_token++];
 }
 
-Token* parser_eat_match(Parser* p, TokenType match, ParseErr err) {
+Token* parser_eat_match(Parser* p, TokenKind match, const char* err) {
   Token* t = parser_eat(p);
-  if (t->type != match) {
+  if (t->kind != match) {
     parse_log_err(p, err);
     return NULL;
   }
@@ -235,8 +187,8 @@ Token* parser_eat_match(Parser* p, TokenType match, ParseErr err) {
   return t;
 }
 
-Token* parser_eat_if(Parser* p, TokenType match) {
-  if (parser_peek(p)->type == match) return parser_eat(p);
+Token* parser_eat_if(Parser* p, TokenKind match) {
+  if (parser_peek(p)->kind == match) return parser_eat(p);
   else return NULL;
 }
 
@@ -256,8 +208,8 @@ void parser_clear(Parser *p) {
   // free array literals
   VEC_FOR(p->exprs) {
     Expr* e = &p->exprs.data[i];
-    if (e->type == ExprTypeLiteral && e->lit.type == LiteralTypeArray) {
-      free(e->lit.arr.vals.data);
+    if (e->kind == ExprKindLiteral && e->lit.kind == LiteralKindArray) {
+      VEC_FREE(e->lit.arr.expr_ids);
     }
   }
   p->exprs.len = 0;
@@ -265,14 +217,14 @@ void parser_clear(Parser *p) {
   // free blocks IntVecs
   VEC_FOR(p->stmts) {
     Stmt* s = &p->stmts.data[i];
-    if (s->type == StmtTypeBlock) {
-      free(s->block.stmt_ids.data);
+    if (s->kind == StmtKindBlock) {
+      VEC_FREE(s->block.stmt_ids);
     }
   }
   p->stmts.len = 0;
   p->top_lvl_stmts.len = 0;
 
-  p->err = ErrNone;
+  p->err = NULL;
 }
 
 void parser_free(Parser *p) {
@@ -290,7 +242,7 @@ typedef struct {
 #define PREC(_a, _b) (PrecLvl) {(_a), (_b)}
 
 int prefix_lvl(Token* op) {
-  switch (op->type) {
+  switch (op->kind) {
     case TokSub: return 30;
     case TokNot: return 29;
     default: return -1;
@@ -298,7 +250,7 @@ int prefix_lvl(Token* op) {
 }
 
 int postfix_lvl(Token* op) {
-  switch (op->type) {
+  switch (op->kind) {
     case TokBraceLeft: return 32;
     default: return -1;
   }
@@ -306,7 +258,7 @@ int postfix_lvl(Token* op) {
 
 // https://www.alphacodingskills.com/rust/notes/rust-operators-precedence.php
 PrecLvl infix_lvl(Token* op) {
-  switch (op->type) {
+  switch (op->kind) {
     case TokAdd:
     case TokSub:
       return PREC(23,24);
@@ -334,28 +286,28 @@ PrecLvl infix_lvl(Token* op) {
 }
 
 Expr literal_primitive(Token* t) {
-  ExprLiteral lit = {(LiteralType) t->type, .tok = t};
-  return (Expr) { ExprTypeLiteral, .lit = lit };
+  ExprLiteral lit = {(LiteralKind) t->kind, .tok = t};
+  return (Expr) { ExprKindLiteral, .lit = lit };
 }
 
-Expr literal_array(IntVec vals) {
-  LiteralArray arr = { vals };
-  ExprLiteral lit = {LiteralTypeArray, .arr = arr};
-  return (Expr) { ExprTypeLiteral, .lit = lit };
+Expr literal_array(IntVec expr_ids) {
+  LiteralArray arr = { expr_ids };
+  ExprLiteral lit = {LiteralKindArray, .arr = arr};
+  return (Expr) { ExprKindLiteral, .lit = lit };
 }
 
 Expr variable(Token* t) {
-  return (Expr) { ExprTypeVariable, .ident = t };
+  return (Expr) { ExprKindVariable, .ident = t };
 }
 
 Expr unary(Token* op, int rhs) {
-  ExprUnary un = {op->type, rhs};
-  return (Expr) { ExprTypeUnary, .un = un };
+  ExprUnary un = {op->kind, rhs};
+  return (Expr) { ExprKindUnary, .un = un };
 }
 
 Expr binary(int lhs, Token* op, int rhs) {
-  ExprBinary bin = {lhs, op->type, rhs};
-  return (Expr) { ExprTypeBinary, .bin = bin };
+  ExprBinary bin = {lhs, op->kind, rhs};
+  return (Expr) { ExprKindBinary, .bin = bin };
 }
 
 // https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
@@ -365,7 +317,8 @@ int parse_expr(Parser* p, int prec_lvl) {
 
   // parse lhs
   int lhs;
-  switch (t->type) {
+  switch (t->kind) {
+    case TokInt:
     case TokFloat:
     case TokTrue:
     case TokFalse:
@@ -385,34 +338,37 @@ int parse_expr(Parser* p, int prec_lvl) {
 
     case TokParenLeft:
       lhs = parse_expr(p, 0);
-      if (parser_eat_match(p, TokParenRight, UnclosedParen) == NULL) return -1;
+      if (parser_eat_match(p, TokParenRight, "unclosed parenthesis for expression") == NULL) return -1;
       break;
 
     case TokBraceLeft:
-      IntVec vals = {0};
+      IntVec expr_ids = {0};
 
       // empty array
-      if (parser_eat_if(p, TokBraceRight) != NULL)
-        return parser_push_expr(p, literal_array(vals));
+      if (parser_eat_if(p, TokBraceRight) != NULL){
+        parse_log_err(p, "empty arrays are illegal");
+        return -1;
+      }
   
       while (1) {
         int val = parse_expr(p, 0);
-        VEC_PUSH(vals, val);
+        VEC_PUSH(expr_ids, val);
 
         t = parser_eat(p);
-        if (t->type == TokBraceRight) break;
-        else if (t->type == TokComma) {
-          if (parser_peek(p)->type == TokBraceRight) break;
+        if (t->kind == TokBraceRight) break;
+        else if (t->kind == TokComma) {
+          // we can have a comma at the end without any expression after
+          if (parser_peek(p)->kind == TokBraceRight) break;
         } else {
-          parse_log_err(p, ExpectCommaOrBraceClose);
+          parse_log_err(p, "expected comma or brace closing for array literal");
           return -1;
         }
       }
-      return parser_push_expr(p, literal_array(vals));
+      return parser_push_expr(p, literal_array(expr_ids));
       break;
 
     default:
-      parse_log_err(p, BadExpr);
+      parse_log_err(p, "invalid expression");
       return -1;
   }
 
@@ -427,9 +383,9 @@ int parse_expr(Parser* p, int prec_lvl) {
       if (postfix < prec_lvl) break;
       parser_eat(p);
 
-      if (op->type == TokBraceLeft) {
+      if (op->kind == TokBraceLeft) {
         int rhs = parse_expr(p, 0);
-        if (parser_eat_match(p, TokBraceRight, UnclosedBrace) == NULL) return -1;
+        if (parser_eat_match(p, TokBraceRight, "unclosed brace for array literal") == NULL) return -1;
         
         lhs = parser_push_expr(p, binary(lhs, op, rhs));
       } else {
@@ -462,10 +418,10 @@ int parse_expr(Parser* p, int prec_lvl) {
 //   Stmt stmt;
 //   if (declaration) {
 //     StmtAssign decl = (StmtAssign) {name, rhs};
-//     stmt = (Stmt) { StmtTypeDecl, .decl = decl };
+//     stmt = (Stmt) { StmtKindDecl, .decl = decl };
 //   } else {
 //     StmtAssign assign = (StmtAssign) {name, rhs};
-//     stmt = (Stmt) { StmtTypeAssign, .assign = assign };
+//     stmt = (Stmt) { StmtKindAssign, .assign = assign };
 //   }
 
 //   return parser_push_stmt(p, stmt);
@@ -485,7 +441,7 @@ int parse_assign(Parser* p) {
   int rhs = parse_expr(p, 0);
 
   StmtAssign assign = (StmtAssign) {name, rhs};
-  Stmt stmt = (Stmt) { StmtTypeAssign, .assign = assign };
+  Stmt stmt = (Stmt) { StmtKindAssign, .assign = assign };
   return parser_push_stmt(p, stmt);
 }
 
@@ -496,30 +452,30 @@ int parse_decl(Parser* p) {
   int rhs = parse_expr(p, 0);
 
   StmtAssign decl = (StmtAssign) {name, rhs};
-  Stmt stmt = (Stmt) { StmtTypeDecl, .decl = decl };
+  Stmt stmt = (Stmt) { StmtKindDecl, .decl = decl };
   return parser_push_stmt(p, stmt);
 }
 
 int parse_stmt(Parser* p);
 int parse_block(Parser* p) {
   // eat '{'
-  if (parser_eat_match(p, TokCurlyLeft, ExpectBlock) == NULL) return -1;
+  if (parser_eat_match(p, TokCurlyLeft, "expected opening block curly brace") == NULL) return -1;
 
   IntVec stmt_ids = {0};
-  while (!parser_is_at_end(p) && parser_peek(p)->type != TokCurlyRight) {
+  while (!parser_is_at_end(p) && parser_peek(p)->kind != TokCurlyRight) {
     int s = parse_stmt(p);
     VEC_PUSH(stmt_ids, s);
   }
   
   if (parser_is_at_end(p)) {
-    parse_log_err(p, UnclosedBlock);
+    parse_log_err(p, "unclosed block, expected curly brace");
     return -1;
   }
 
   // we are sure to have reached a '}', we would have reached end of tokens otherwise
   // eat '}'
   parser_eat(p);
-  return parser_push_stmt(p, (Stmt) {StmtTypeBlock, .block = {stmt_ids}});
+  return parser_push_stmt(p, (Stmt) {StmtKindBlock, .block = {stmt_ids}});
 }
 
 int parse_if_else(Parser* p) {
@@ -529,14 +485,14 @@ int parse_if_else(Parser* p) {
   int if_id = parse_block(p);
 
   int else_id = -1;
-  if (parser_peek(p)->type == TokElse) {
+  if (parser_peek(p)->kind == TokElse) {
     // eat 'else'
     parser_eat(p);
     else_id = parse_block(p);
   }
 
   StmtIfElse stmt = { .cond_idx = expr_id, .if_idx = if_id, .else_idx = else_id };
-  return parser_push_stmt(p, (Stmt) {StmtTypeIfElse, .if_else = stmt});
+  return parser_push_stmt(p, (Stmt) {StmtKindIfElse, .if_else = stmt});
 }
 
 int parse_while(Parser* p) {
@@ -546,27 +502,27 @@ int parse_while(Parser* p) {
   int while_id = parse_block(p);
 
   StmtWhile stmt = { .cond_idx = expr_id, .block_idx = while_id };
-  return parser_push_stmt(p, (Stmt) {StmtTypeWhile, .wloop = stmt});
+  return parser_push_stmt(p, (Stmt) {StmtKindWhile, .wloop = stmt});
 }
 
 int parse_stmt(Parser* p) {
   int stmt = -1;
-  switch(parser_peek(p)->type) {
+  switch(parser_peek(p)->kind) {
     // case TokVar: return parse_decl(p);
     case TokCurlyLeft: stmt = parse_block(p); break;
     case TokIf: stmt = parse_if_else(p); break;
     case TokWhile: stmt = parse_while(p); break;
 
     default: {
-      bool is_ident = parser_peek(p)->type == TokIdent; 
-      if (is_ident && parser_peek_nth(p, 1)->type == TokAssign)
+      bool is_ident = parser_peek(p)->kind == TokIdent; 
+      if (is_ident && parser_peek_nth(p, 1)->kind == TokAssign)
         stmt = parse_assign(p);
-      else if (is_ident && parser_peek_nth(p, 1)->type == TokDecl)
+      else if (is_ident && parser_peek_nth(p, 1)->kind == TokDecl)
         stmt = parse_decl(p);
       else {
         // expression
         int id = parse_expr(p, 0);
-        stmt = parser_push_stmt(p, (Stmt) {StmtTypeExpr, .expr_idx = id});
+        stmt = parser_push_stmt(p, (Stmt) {StmtKindExpr, .expr_idx = id});
       }
     } break;
   }

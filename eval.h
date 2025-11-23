@@ -3,15 +3,51 @@
 
 // TODO: returning Value might be costly
 
-Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
+typedef struct {
+  Parser* p;
+  SymTbl* tbl;
+
+  const char* err;
+} Context;
+
+// int ctx_push_val(Context* c, Value val) {
+//   VEC_PUSH(c->vals, val);
+//   return c->vals.len-1;
+// }
+
+// Value* ctx_get_val(Context* c, int idx) {
+//   return &c->vals.data[idx];
+// }
+
+void eval_log_err(Context* c, const char* err) {
+  c->err = err;
+  fprintf(stderr, "[EVAL ERR] %s\n", err); 
+}
+
+Value eval_expr(Context* ctx, int expr_id) {
+  SymTbl* tbl = ctx->tbl;
+  Parser* p = ctx->p;
+
   Expr* e = parser_get_expr(p, expr_id);
 
-  switch (e->type) {
-    case ExprTypeLiteral: {
+  switch (e->kind) {
+    case ExprKindLiteral: {
       ExprLiteral lit = e->lit;
+
       Value v;
-      switch (lit.type) {
-        case LiteralTypeFloat: {
+      switch (lit.kind) {
+        case LiteralKindInt: {
+          char* start = p->src + lit.tok->offset;
+          int len = lit.tok->len;
+          // TODO: consider using a buffer instead of allocating
+          char* str = str_clone(start, len);
+          int val = atoi(str);
+          free(str);
+          
+          v = make_int_value(val);
+        } break;
+
+        case LiteralKindFloat: {
           char* start = p->src + lit.tok->offset;
           int len = lit.tok->len;
           // TODO: consider using a buffer instead of allocating
@@ -22,115 +58,127 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
           v = make_float_value(val);
         } break;
 
-        case LiteralTypeTrue: v = make_bool_value(true); break;
-        case LiteralTypeFalse: v = make_bool_value(false); break;
-        case LiteralTypeArray: {
-          IntVec ids = lit.arr.vals;
-          if (ids.len == 0) {
-            v = make_arr_value(ctx, ValueTypeBool, NULL, 0);
-            break;
-          }
+        case LiteralKindTrue: v = make_bool_value(true); break;
+        case LiteralKindFalse: v = make_bool_value(false); break;
+        case LiteralKindArray: {
+          IntVec ids = lit.arr.expr_ids;
+          
+          // shouldn't be possible
+          // if (ids.len == 0) {
+          //   v = make_arr_value(ctx, ValueKindBool, NULL, 0);
+          //   break;
+          // }
 
           Value* buf = malloc(sizeof(Value) * ids.len);
 
           int expr_id = ids.data[0];
-          Value prev = eval_expr(p, expr_id, ctx);
+          Value prev = eval_expr(ctx, expr_id);
           buf[0] = prev;
 
-          bool same = true;
-          for(int i=1; i<ids.len; i++) {
+          bool same_type = true;
+          for(size_t i=1; i<ids.len; i++) {
             expr_id = ids.data[i];
-            Value curr = eval_expr(p, expr_id, ctx);
-            if (!symtable_type_eq(ctx, &prev, &curr)) {
-              same = false;
+            Value curr = eval_expr(ctx, expr_id);
+            if (!symtbl_type_eq(tbl, &prev, &curr)) {
+              same_type = false;
               break;
             }
             prev = curr;
             buf[i] = curr;
           }
 
-          if (!same) {
+          if (!same_type) {
             free(buf);
-            fprintf(stderr, "[EVAL ERR] array values must be of the same type at expr id %d\n", expr_id); 
+            eval_log_err(ctx, "array values must be of the same type");
             return val_err();
           }
 
-          v = make_arr_value(ctx, prev.type_idx, buf, ids.len);
+          v = make_arr_value(tbl, prev.type_idx, buf, ids.len);
         } break;
       }
 
+      // return ctx_push_val(ctx, v);
       return v;
     } break;
 
-    case ExprTypeVariable: {
+    case ExprKindVariable: {
       char* start = p->src + e->ident->offset;
       int len = e->ident->len;
 
-      Value* res = symtable_find(ctx, start, len);
+      Value* res = symtbl_find(tbl, start, len);
       if (res == NULL) {
-        fprintf(stderr, "[EVAL ERR] undefined variable at expr id %d\n", expr_id); 
+        eval_log_err(ctx, "undefined variable");
         return val_err();
       } else {
         return *res;
       }
     } break;
 
-    case ExprTypeUnary: {
+    case ExprKindUnary: {
       ExprUnary un = e->un;
-      Value rhs = eval_expr(p, un.expr, ctx);
-      Type* type = symtable_get_val_type(ctx, &rhs);
+      Value rhs = eval_expr(ctx, un.expr);
+      Type* type = symtbl_get_val_type(tbl, &rhs);
 
       Value v = {0};
       v.type_idx = rhs.type_idx;
-      switch (type->type) {
-        case ValueTypeFloat: {
+      switch (type->kind) {
+        case ValueKindInt: {
           switch(un.op) {
-            case TokSub: v.num = -rhs.num; break;
+            case TokSub: v.integer = -rhs.integer; break;
             default:
-              fprintf(stderr, "[EVAL ERR] invalid numeric unary operator at expr id %d\n", expr_id); 
+              eval_log_err(ctx, "invalid integer unary operator");
               return val_err();
           }
         } break;
 
-        case ValueTypeBool: {
+        case ValueKindFloat: {
+          switch(un.op) {
+            case TokSub: v.floating = -rhs.floating; break;
+            default:
+              eval_log_err(ctx, "invalid floating unary operator");
+              return val_err();
+          }
+        } break;
+
+        case ValueKindBool: {
           switch(un.op) {
             case TokNot: v.boolean = !rhs.boolean; break;
             default:
-              fprintf(stderr, "[EVAL ERR] invalid bool unary operator at expr id %d\n", expr_id); 
+              eval_log_err(ctx, "invalid bool unary operator");
               return val_err();
           } 
         } break;
 
         default:
-          fprintf(stderr, "[EVAL ERR] type doesn't support unary operation at expr id %d\n", expr_id); 
+          eval_log_err(ctx, "type doesn't support unary operation");
           return val_err();
       }
 
       return v;
     }
 
-    case ExprTypeBinary: {
+    case ExprKindBinary: {
       ExprBinary bin = e->bin;
-      Value lhs = eval_expr(p, bin.lhs_idx, ctx);
-      Value rhs = eval_expr(p, bin.rhs_idx, ctx);
-      Type* lt = symtable_get_val_type(ctx, &lhs);
-      Type* rt = symtable_get_val_type(ctx, &rhs);
+      Value lhs = eval_expr(ctx, bin.lhs_idx);
+      Value rhs = eval_expr(ctx, bin.rhs_idx);
+      Type* lt = symtbl_get_val_type(tbl, &lhs);
+      Type* rt = symtbl_get_val_type(tbl, &rhs);
       
-      if (lt->type == ValueTypeArray && rt->type == ValueTypeFloat) {
+      if (lt->kind == ValueKindArray && rt->kind == ValueKindInt) {
         // array access
-        void* buf = lhs.arr.data;
-        Value* res = ((Value*) buf) + ((int) rhs.num);
-        return *res;
+        Value* buf = lhs.arr.data;
+        Value res = buf[rhs.integer];
+        return res;
       }
 
-      if (!symtable_type_eq(ctx, &lhs, &rhs)) {
-        fprintf(stderr, "[EVAL ERR] binary expression on different types at expr id %d\n", expr_id);
+      if (!symtbl_type_eq(tbl, &lhs, &rhs)) {
+        eval_log_err(ctx, "binary expression on different type");
         return val_err();
       }
       
       Value v = {0};
-      switch (lt->type) {
-        case ValueTypeFloat: {
+      switch (lt->kind) {
+        case ValueKindInt: {
           switch(bin.op) {
             case TokAdd:
             case TokSub:
@@ -139,7 +187,7 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
             case TokRem:
             case TokExp:
               // TODO: not sure about this
-              v.type_idx = ValueTypeFloat;
+              v.type_idx = ValueKindInt;
               break;
 
             case TokEq:     
@@ -149,40 +197,90 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
             case TokGreatEq:
             case TokLessEq:
               // TODO: not sure about this
-              v.type_idx = ValueTypeBool;
+              v.type_idx = ValueKindBool;
               break;
 
             default:
-              fprintf(stderr, "[EVAL ERR] invalid numeric binary operator at expr id %d\n", expr_id); 
+              eval_log_err(ctx, "invalid numeric binary operator");
               return val_err();
           }
 
           switch(bin.op) {
-            case TokAdd: v.num = lhs.num + rhs.num; break;
-            case TokSub: v.num = lhs.num - rhs.num; break;
-            case TokMul: v.num = lhs.num * rhs.num; break;
-            case TokDiv: v.num = lhs.num / rhs.num; break;
-            case TokRem: v.num = fmod(lhs.num, rhs.num); break;
-            case TokExp: v.num = pow(lhs.num, rhs.num); break;
+            case TokAdd: v.integer = lhs.integer + rhs.integer; break;
+            case TokSub: v.integer = lhs.integer - rhs.integer; break;
+            case TokMul: v.integer = lhs.integer * rhs.integer; break;
+            case TokDiv: v.integer = lhs.integer / rhs.integer; break;
+            case TokRem: v.integer = lhs.integer % rhs.integer; break;
+            case TokExp: v.integer = pow(lhs.integer, rhs.integer); break;
 
-            case TokEq:       v.boolean = lhs.num == rhs.num; break;
-            case TokNotEq:    v.boolean = lhs.num != rhs.num; break;
-            case TokGreat:    v.boolean = lhs.num >  rhs.num; break;
-            case TokLess:     v.boolean = lhs.num <  rhs.num; break;
-            case TokGreatEq:  v.boolean = lhs.num >= rhs.num; break;
-            case TokLessEq:   v.boolean = lhs.num <= rhs.num; break;
+            case TokEq:       v.boolean = lhs.integer == rhs.integer; break;
+            case TokNotEq:    v.boolean = lhs.integer != rhs.integer; break;
+            case TokGreat:    v.boolean = lhs.integer >  rhs.integer; break;
+            case TokLess:     v.boolean = lhs.integer <  rhs.integer; break;
+            case TokGreatEq:  v.boolean = lhs.integer >= rhs.integer; break;
+            case TokLessEq:   v.boolean = lhs.integer <= rhs.integer; break;
 
             default:
-              fprintf(stderr, "[EVAL ERR] invalid numeric binary operator at expr id %d\n", expr_id); 
+              eval_log_err(ctx, "invalid numeric binary operator");
               return val_err();
           }
 
           return v;
         }
 
-        case ValueTypeBool: {
+        case ValueKindFloat: {
+          switch(bin.op) {
+            case TokAdd:
+            case TokSub:
+            case TokMul:
+            case TokDiv:
+            case TokRem:
+            case TokExp:
+              // TODO: not sure about this
+              v.type_idx = ValueKindFloat;
+              break;
+
+            case TokEq:     
+            case TokNotEq:
+            case TokGreat:
+            case TokLess:
+            case TokGreatEq:
+            case TokLessEq:
+              // TODO: not sure about this
+              v.type_idx = ValueKindBool;
+              break;
+
+            default:
+              eval_log_err(ctx, "invalid numeric binary operator");
+              return val_err();
+          }
+
+          switch(bin.op) {
+            case TokAdd: v.floating = lhs.floating + rhs.floating; break;
+            case TokSub: v.floating = lhs.floating - rhs.floating; break;
+            case TokMul: v.floating = lhs.floating * rhs.floating; break;
+            case TokDiv: v.floating = lhs.floating / rhs.floating; break;
+            case TokRem: v.floating = fmod(lhs.floating, rhs.floating); break;
+            case TokExp: v.floating = pow(lhs.floating, rhs.floating); break;
+
+            case TokEq:       v.boolean = lhs.floating == rhs.floating; break;
+            case TokNotEq:    v.boolean = lhs.floating != rhs.floating; break;
+            case TokGreat:    v.boolean = lhs.floating >  rhs.floating; break;
+            case TokLess:     v.boolean = lhs.floating <  rhs.floating; break;
+            case TokGreatEq:  v.boolean = lhs.floating >= rhs.floating; break;
+            case TokLessEq:   v.boolean = lhs.floating <= rhs.floating; break;
+
+            default:
+              eval_log_err(ctx, "invalid numeric binary operator");
+              return val_err();
+          }
+
+          return v;
+        }
+
+        case ValueKindBool: {
           // TODO: not sure about this
-          v.type_idx = ValueTypeBool;
+          v.type_idx = ValueKindBool;
 
           switch(bin.op) {
             case TokAnd:      v.boolean = lhs.boolean && rhs.boolean; break;
@@ -194,7 +292,7 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
             case TokGreatEq:  v.boolean = lhs.boolean >= rhs.boolean; break;
             case TokLessEq:   v.boolean = lhs.boolean <= rhs.boolean; break;
             default:
-              fprintf(stderr, "[EVAL ERR] invalid bool binary operator at expr id %d\n", expr_id); 
+              eval_log_err(ctx, "invalid bool binary operator");
               return val_err();
           }
 
@@ -202,7 +300,7 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
         }
 
         default:
-          fprintf(stderr, "[EVAL ERR] type doesn't support binary operation at expr id %d\n", expr_id); 
+          eval_log_err(ctx, "type doesn't support binary operation");
           return val_err();
       }
     }
@@ -211,81 +309,91 @@ Value eval_expr(Parser* p, int expr_id, SymbolTable* ctx) {
   return val_err();
 }
 
-void eval_block(Parser* p, IntVec stmts, SymbolTable* ctx) {
+void eval_block(Context* ctx, IntVec stmts) {
+  SymTbl* tbl = ctx->tbl;
+  Parser* p = ctx->p;
+
   VEC_FOR(stmts) {
     Stmt* s = parser_get_stmt(p, stmts.data[i]);
 
-    switch(s->type) {
-      case StmtTypeDecl: {
+    switch(s->kind) {
+      case StmtKindDecl: {
         char* start = p->src + s->assign.tok->offset;
         int len = s->assign.tok->len;
-        Value val = eval_expr(p, s->assign.rhs_idx, ctx);
+        Value val = eval_expr(ctx, s->assign.rhs_idx);
 
-        symtable_insert(ctx, start, len, val);
+        symtbl_insert(tbl, start, len, val);
       } break;
 
-      case StmtTypeAssign: {
+      case StmtKindAssign: {
         char* start = p->src + s->decl.tok->offset;
         int len = s->decl.tok->len;
 
-        Value* res = symtable_find(ctx, start, len);
-        if (res == NULL) {
-          fprintf(stderr, "[EVAL ERR] undeclared variable at expr id %ld\n", i); 
+        Value* var = symtbl_find(tbl, start, len);
+        if (var == NULL) {
+          eval_log_err(ctx, "undeclared variable");
           return;
         } else {
-          *res = eval_expr(p, s->decl.rhs_idx, ctx);
+          Value res = eval_expr(ctx, s->decl.rhs_idx);
+          if (!symtbl_type_eq(tbl, var, &res)) {
+            eval_log_err(ctx, "assignment of different type");
+            return;
+          }
+
+          *var = res;
         }
       } break;
 
-      case StmtTypeBlock: {
-        symtable_push_scope(ctx);
-        eval_block(p, s->block.stmt_ids, ctx);
-        symtable_pop_scope(ctx);
+      case StmtKindBlock: {
+        symtbl_push_scope(tbl);
+        eval_block(ctx, s->block.stmt_ids);
+        symtbl_pop_scope(tbl);
       } break;
 
-      case StmtTypeIfElse: {
+      case StmtKindIfElse: {
         StmtIfElse if_else = s->if_else;
-        Value cond = eval_expr(p, if_else.cond_idx, ctx);
+        Value cond = eval_expr(ctx, if_else.cond_idx);
 
-        if (symtable_get_val_type(ctx, &cond)->type != ValueTypeBool) {
-          fprintf(stderr, "[EVAL ERR] if condition isn't bool at expr id %ld\n", i); 
+        if (symtbl_get_val_type(ctx->tbl, &cond)->kind != ValueKindBool) {
+          eval_log_err(ctx, "if condition isn't bool");
           return;
         }
 
         int block_idx = cond.boolean ? if_else.if_idx : if_else.else_idx;
 
         if (block_idx != -1) {
-          symtable_push_scope(ctx);
+          symtbl_push_scope(tbl);
           Stmt* block = parser_get_stmt(p, block_idx);
-          eval_block(p, block->block.stmt_ids, ctx);
-          symtable_pop_scope(ctx);
+          eval_block(ctx, block->block.stmt_ids);
+          symtbl_pop_scope(tbl);
         }
       } break;
 
-      case StmtTypeWhile: {
+      case StmtKindWhile: {
         StmtWhile wloop = s->wloop;
-        Value cond = eval_expr(p, wloop.cond_idx, ctx);
-        if (symtable_get_val_type(ctx, &cond)->type != ValueTypeBool) {
-          fprintf(stderr, "[EVAL ERR] while condition isn't bool at expr id %ld\n", i); 
+        Value cond = eval_expr(ctx, wloop.cond_idx);
+        if (symtbl_get_val_type(tbl, &cond)->kind != ValueKindBool) {
+          eval_log_err(ctx, "while condition isn't bool");
           return;
         }
 
         Stmt* block = parser_get_stmt(p, wloop.block_idx);
         while (cond.boolean) {
-          symtable_push_scope(ctx);
-          eval_block(p, block->block.stmt_ids, ctx);
-          symtable_pop_scope(ctx);
+          symtbl_push_scope(tbl);
+          eval_block(ctx, block->block.stmt_ids);
+          symtbl_pop_scope(tbl);
 
-          cond = eval_expr(p, wloop.cond_idx, ctx);
+          cond = eval_expr(ctx, wloop.cond_idx);
         }
       } break;
 
-      case StmtTypeExpr: {
-        Value res = eval_expr(p, s->expr_idx, ctx);
-        Type* type = symtable_get_val_type(ctx, &res);
-        switch (type->type) {
-          case ValueTypeFloat: printf("%lf\n", res.num); break;
-          case ValueTypeBool: printf("%s\n", res.boolean ? "true" : "false"); break;
+      case StmtKindExpr: {
+        Value res = eval_expr(ctx, s->expr_idx);
+        Type* type = symtbl_get_val_type(ctx->tbl, &res);
+        switch (type->kind) {
+          case ValueKindInt: printf("Int: %d\n", res.integer); break;
+          case ValueKindFloat: printf("Float: %lf\n", res.floating); break;
+          case ValueKindBool: printf("Bool: %s\n", res.boolean ? "true" : "false"); break;
           default: break;
         }
         break;
@@ -294,6 +402,7 @@ void eval_block(Parser* p, IntVec stmts, SymbolTable* ctx) {
   }
 }
  
-void eval(Parser* p, SymbolTable* ctx) {
-  eval_block(p, p->top_lvl_stmts, ctx);
+void eval(Parser* p, SymTbl* tbl) {
+  Context ctx = { p, tbl, NULL };
+  eval_block(&ctx, p->top_lvl_stmts);
 }

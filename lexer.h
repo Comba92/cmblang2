@@ -19,7 +19,7 @@ typedef enum {
   TokExp = '^',
   TokAssign = '=',
   TokBang = '!',
-  TokMark = '?',
+  TokQuestion = '?',
   TokGreat = '>',
   TokLess = '<',
   TokColon = ':',
@@ -29,7 +29,7 @@ typedef enum {
   TokQuote = '\'',
   Tok2Quote = '"',
   TokDollar = '$',
-  TokAsand = '&',
+  TokSand = '&',
   TokHash = '#',
   
   TokAnd = 128,
@@ -46,6 +46,7 @@ typedef enum {
   Tok2Dot,
   Tok2Slash,
   
+  TokInt,
   TokFloat,
   TokIdent,
 
@@ -60,34 +61,38 @@ typedef enum {
   TokReturn,
   TokStruct,
   TokAs,
-} TokenType;
+} TokenKind;
 
 typedef struct {
   const char* name;
   size_t len; 
-  TokenType type;
+  TokenKind kind;
 } KeywordData;
 
+#define KEYWORDS_LIST \
+  X(true, TokTrue) \
+  X(false, TokFalse) \
+  X(and, TokAnd) \
+  X(or, TokOr) \
+  X(not, TokNot) \
+  X(if, TokIf) \
+  X(else, TokElse) \
+  X(while, TokWhile) \
+  X(for, TokFor) \
+  X(fn, TokFn) \
+  X(return, TokReturn) \
+  X(struct, TokStruct) \
+  X(as, TokAs) \
+
+#define X(name, tok) { #name, sizeof(#name)-1, tok },
 static const KeywordData KEYWORDS[] = {
-  // { "var",    sizeof("var"),    TokVar },
-  { "true",   sizeof("true"),   TokTrue },
-  { "false",  sizeof("false"),  TokFalse },
-  { "and",    sizeof("and"),    TokAnd },
-  { "or",     sizeof("or"),     TokOr },
-  { "not",    sizeof("not"),    TokNot },
-  { "if",     sizeof("if"),     TokIf },
-  { "else",   sizeof("else"),   TokElse },
-  { "while",  sizeof("while"),  TokWhile },
-  { "for",    sizeof("for"),    TokFor },
-  { "fn",     sizeof("fn"),     TokFn },
-  { "return", sizeof("return"), TokReturn },
-  { "struct", sizeof("struct"), TokStruct },
-  { "as",     sizeof("as"),     TokAs },
+  KEYWORDS_LIST
 };
+#undef X
 const size_t KEYWORDS_LEN = sizeof(KEYWORDS) / sizeof(KeywordData);
 
 typedef struct {
-  TokenType type;
+  TokenKind kind;
   int offset;
   int len;
 } Token;
@@ -97,41 +102,41 @@ VEC_DEF(Token);
 static Token TOKEN_ERR = { TokErr, -1, -1 };
 
 Token tok_sym(char c, int offset) {
-  return (Token) { (TokenType) c,  offset, 1 };
+  return (Token) { (TokenKind) c,  offset, 1 };
 }
 
-Token tok_sym2(TokenType c, int offset) {
+Token tok_sym2(TokenKind c, int offset) {
   return (Token) { c,  offset, 2 };
 }
 
 int tok_is_op(Token* t) {
-  return t->type == TokParenLeft
-    // || t->type == TokParenRight
-    || t->type == TokBraceLeft
-    // || t->type == TokBraceRight
-    || t->type == TokAdd
-    || t->type == TokMul
-    || t->type == TokSub
-    || t->type == TokDiv
-    || t->type == TokRem
-    || t->type == TokExp
-    || t->type == TokAnd
-    || t->type == TokOr
-    || t->type == TokNot
-    || t->type == TokEq
-    || t->type == TokNotEq
-    || t->type == TokGreat
-    || t->type == TokGreatEq
-    || t->type == TokLess
-    || t->type == TokLessEq;
+  return t->kind == TokParenLeft
+    // || t->kind == TokParenRight
+    || t->kind == TokBraceLeft
+    // || t->kind == TokBraceRight
+    || t->kind == TokAdd
+    || t->kind == TokMul
+    || t->kind == TokSub
+    || t->kind == TokDiv
+    || t->kind == TokRem
+    || t->kind == TokExp
+    || t->kind == TokAnd
+    || t->kind == TokOr
+    || t->kind == TokNot
+    || t->kind == TokEq
+    || t->kind == TokNotEq
+    || t->kind == TokGreat
+    || t->kind == TokGreatEq
+    || t->kind == TokLess
+    || t->kind == TokLessEq;
 }
 
 void token_dbg(TokenVec tokens, int idx) {
   Token* t = &tokens.data[idx];
-  printf("[TOKEN %d] kind = %c, col = %d, len = %d\n", idx, t->type, t->offset, t->len);
+  printf("[TOKEN %d] kind = %c, col = %d, len = %d\n", idx, t->kind, t->offset, t->len);
 }
 
-Token lexer_match_or(char* s, char match, int column, TokenType tok, TokenType or) {
+Token lexer_eat_if_or(char* s, char match, int column, TokenKind tok, TokenKind or) {
   if (*(s + 1) == match) {
     return tok_sym2(tok, column);
   } else {
@@ -162,7 +167,6 @@ TokenVec tokenize(char* str) {
 
     char c = *str;
     Token t;
-
     switch(c) {
       case '(':
       case ')':
@@ -184,13 +188,13 @@ TokenVec tokenize(char* str) {
         t = tok_sym(c, column);
         break;
 
-      case '/': t = lexer_match_or(str, '/', column, Tok2Slash, TokDiv); break;
-      case '.': t = lexer_match_or(str, '.', column, Tok2Dot, TokDot); break;
-      case '-': t = lexer_match_or(str, '>', column, TokArrow, TokSub); break;
-      case '=': t = lexer_match_or(str, '=', column, TokEq, TokAssign); break;
-      case '<': t = lexer_match_or(str, '=', column, TokLessEq, TokLess); break;
-      case '>': t = lexer_match_or(str, '=', column, TokGreatEq, TokGreat); break;
-      case '!': t = lexer_match_or(str, '=', column, TokNotEq, TokBang); break;
+      case '/': t = lexer_eat_if_or(str, '/', column, Tok2Slash, TokDiv); break;
+      case '.': t = lexer_eat_if_or(str, '.', column, Tok2Dot, TokDot); break;
+      case '-': t = lexer_eat_if_or(str, '>', column, TokArrow, TokSub); break;
+      case '=': t = lexer_eat_if_or(str, '=', column, TokEq, TokAssign); break;
+      case '<': t = lexer_eat_if_or(str, '=', column, TokLessEq, TokLess); break;
+      case '>': t = lexer_eat_if_or(str, '=', column, TokGreatEq, TokGreat); break;
+      case '!': t = lexer_eat_if_or(str, '=', column, TokNotEq, TokBang); break;
       case ':': {
         char next = *(str + 1);
         if (next == ':') t = tok_sym2(Tok2Colon, column);
@@ -209,16 +213,18 @@ TokenVec tokenize(char* str) {
           if (str[len] == '.') {
             len++;
             while (str[len] != '\0' && isdigit(str[len])) len++;
+            t = (Token) {TokFloat, column, len};
+          } else {
+            t = (Token) {TokInt, column, len};
           }
-          
-          t = (Token) {TokFloat, column, len};
         } else if (isalpha(c)) {
           bool is_keyword = false;
           // keywords
           for (size_t i=0; i<KEYWORDS_LEN; i++) {
             KeywordData keyword = KEYWORDS[i];
-            if (strncmp(str, keyword.name, keyword.len-1) == 0) {
-              t = (Token) {keyword.type, column, keyword.len-1};
+            // len doesn't include null char
+            if (strncmp(str, keyword.name, keyword.len) == 0) {
+              t = (Token) {keyword.kind, column, keyword.len};
               is_keyword = true;
               break;
             }

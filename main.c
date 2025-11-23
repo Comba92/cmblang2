@@ -9,7 +9,7 @@ int main() {
 
   #define BUF_SIZE 1024
   char buf[BUF_SIZE];
-  SymbolTable ctx = symtable_init();
+  SymTbl ctx = symtbl_init();
   Parser parser = {0};
 
   while(1) {
@@ -21,7 +21,7 @@ int main() {
     // VEC_FOR(parser.exprs) expr_dbg(parser.exprs, i);
     // VEC_FOR(parser.stmts) stmt_dbg(parser.stmts, i);
 
-    if (parser.err == ErrNone) {
+    if (parser.err == NULL) {
       eval(&parser, &ctx);
     }
   }
