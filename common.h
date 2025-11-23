@@ -32,6 +32,13 @@ typedef double    f64;
 }
 #define VEC_POP(_vec) (_vec).data[(_vec).len--]
 #define VEC_FREE(_vec) free((_vec).data)
+#define VEC_RESERVE(_vec, _cap) \
+{ \
+  if ((_vec).cap < _cap) { \
+    while((_vec).cap < (_cap)) (_vec).cap *= 2; \
+    (_vec).data = realloc((_vec).data, (_vec).cap * sizeof((_vec).data[0])); \
+  } \
+} \
 
 #define VEC_DEF_NAMED(_name, _type) \
 typedef struct { \
@@ -57,8 +64,15 @@ char* str_clone(char* str, size_t len) {
 }
 
 void string_append(String* sb, char* sv) {
-  // TODO: what about strcpy?
+  // TODO: what about strcpy? + reserve
   while (*sv != '\0') {
+    VEC_PUSH(*sb, *sv);
+    sv++;
+  }
+}
+
+void string_append_n(String* sb, char* sv, int n) {
+  while (n-- > 0) {
     VEC_PUSH(*sb, *sv);
     sv++;
   }

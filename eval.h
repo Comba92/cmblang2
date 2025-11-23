@@ -318,16 +318,25 @@ void eval_block(Context* ctx, IntVec stmts) {
 
     switch(s->kind) {
       case StmtKindDecl: {
-        char* start = p->src + s->assign.tok->offset;
-        int len = s->assign.tok->len;
-        Value val = eval_expr(ctx, s->assign.rhs_idx);
+        char* start = p->src + s->decl.name->offset;
+        int len = s->decl.name->len;
+        Value val = eval_expr(ctx, s->decl.rhs_idx);
 
         symtbl_insert(tbl, start, len, val);
       } break;
 
+      case StmtKindFnDecl: {
+        // char* start = p->src + s->fn_decl.name->offset;
+        // int len = s->fn_decl.name->len;
+
+        // Value val = make_func_const(ctx, &s->fn_decl);
+
+        // symtbl_insert(tbl, start, len, val);
+      } break;
+
       case StmtKindAssign: {
-        char* start = p->src + s->decl.tok->offset;
-        int len = s->decl.tok->len;
+        char* start = p->src + s->assign.var->offset;
+        int len = s->assign.var->len;
 
         Value* var = symtbl_find(tbl, start, len);
         if (var == NULL) {

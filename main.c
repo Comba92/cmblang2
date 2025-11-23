@@ -1,15 +1,15 @@
 #include "common.h"
-
 #include "lexer.h"
 #include "parser.h"
-#include "eval.h"
+// #include "eval.h"
+// #include "table.h"
 
 int main() {
   printf("Hello!\n");
 
   #define BUF_SIZE 1024
   char buf[BUF_SIZE];
-  SymTbl ctx = symtbl_init();
+  // SymTbl ctx = symtbl_init();
   Parser parser = {0};
 
   while(1) {
@@ -21,9 +21,9 @@ int main() {
     // VEC_FOR(parser.exprs) expr_dbg(parser.exprs, i);
     // VEC_FOR(parser.stmts) stmt_dbg(parser.stmts, i);
 
-    if (parser.err == NULL) {
-      eval(&parser, &ctx);
-    }
+    // if (parser.err == NULL) {
+    //   eval(&parser, &ctx);
+    // }
   }
 
   return 0;

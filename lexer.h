@@ -1,5 +1,4 @@
 #pragma once
-#include "common.h"
 
 // TODO: if Token type stays small, consider passing always by copy instead of pointer
 
@@ -48,6 +47,7 @@ typedef enum {
   
   TokInt,
   TokFloat,
+  TokBool,
   TokIdent,
 
   // TokVar,
@@ -84,6 +84,10 @@ typedef struct {
   X(struct, TokStruct) \
   X(as, TokAs) \
 
+  // X(int, TokInt) \
+  // X(float, TokFloat) \
+  // X(bool, TokBool) \
+
 #define X(name, tok) { #name, sizeof(#name)-1, tok },
 static const KeywordData KEYWORDS[] = {
   KEYWORDS_LIST
@@ -96,7 +100,6 @@ typedef struct {
   int offset;
   int len;
 } Token;
-
 VEC_DEF(Token);
 
 static Token TOKEN_ERR = { TokErr, -1, -1 };
@@ -109,7 +112,7 @@ Token tok_sym2(TokenKind c, int offset) {
   return (Token) { c,  offset, 2 };
 }
 
-int tok_is_op(Token* t) {
+bool tok_is_op(Token* t) {
   return t->kind == TokParenLeft
     // || t->kind == TokParenRight
     || t->kind == TokBraceLeft
@@ -129,6 +132,18 @@ int tok_is_op(Token* t) {
     || t->kind == TokGreatEq
     || t->kind == TokLess
     || t->kind == TokLessEq;
+}
+
+bool tok_is_expr(Token* t) {
+  return t->kind == TokIdent
+    || t->kind == TokSub
+    || t->kind == TokNot
+    || t->kind == TokInt
+    || t->kind == TokFloat
+    || t->kind == TokTrue
+    || t->kind == TokFalse
+    || t->kind == TokBraceLeft
+    || t->kind == TokParenLeft;
 }
 
 void token_dbg(TokenVec tokens, int idx) {
@@ -199,7 +214,7 @@ TokenVec tokenize(char* str) {
         char next = *(str + 1);
         if (next == ':') t = tok_sym2(Tok2Colon, column);
         else if (next == '=') t = tok_sym2(TokDecl, column);
-        else t = tok_sym('.', column);
+        else t = tok_sym(TokColon, column);
       }; break;
 
       case '\0':

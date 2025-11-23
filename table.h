@@ -1,28 +1,36 @@
 #pragma once
-#include "common.h"
 
 typedef enum {
   ValueKindBool = 0,
   ValueKindInt = 1,
   ValueKindFloat = 2,
   ValueKindArray,
-  ValueKindStruct,
   ValueKindFunc,
+  ValueKindStruct,
 } ValueKind;
+
+typedef struct {
+  int size;
+  int subtype_id;
+} TypeArray;
 
 typedef struct {
   IntVec fields_ids;
 } TypeStruct;
 
 typedef struct {
-
+  IntVec params_types;
+  int return_type_idx;
 } TypeFunc;
 
 typedef struct {
   ValueKind kind;
   char* name;
+  int size;
   union {
     int subtype_idx;
+    TypeFunc func;
+    TypeStruct strct;
   };
 } Type;
 VEC_DEF(Type);
@@ -31,9 +39,15 @@ typedef struct Value Value;
 VEC_DEF(Value);
 
 typedef struct {
+  // should len be on the type or on the value?
   int len;
   Value* data;
 } ValueArray;
+
+typedef struct {
+  Value* args;
+  int block_id;
+} ValueFunc;
 
 struct Value {
   int type_idx;
@@ -42,6 +56,7 @@ struct Value {
     double floating;
     bool boolean;
     ValueArray arr;
+    ValueFunc func;
   };
 };
 
@@ -78,6 +93,10 @@ Type* symtbl_get_val_type(SymTbl* tbl, Value* val) {
 // Type* symtbl_get_val_id_type(SymTbl* tbl, int val_idx) {
 //   return symtbl_get_val_type(tbl, symtbl_get_val(tbl, val_idx)); 
 // }
+
+int symtbl_parse_type(SymTbl* tbl, char* str) {
+
+}
 
 int symtbl_insert_type(SymTbl* tbl, Type t) {
   int present = -1;
@@ -117,17 +136,35 @@ Value make_bool_value(bool val) {
   return (Value) { ValueKindBool, .boolean = val };
 }
 
-Value make_arr_value(SymTbl* tbl, int subtype, void* data, int len) {
-  char* subtype_name = tbl->types.data[subtype].name;
-
+Value make_arr_value(SymTbl* tbl, int subtype_idx, Value* data, int len) {
+  Type* subtype = &tbl->types.data[subtype_idx];
   String name = {0};
-  string_append(&name, "arr ");
-  string_append(&name, subtype_name);
+  string_append(&name, "[");
+  string_append(&name, subtype->name);
+  string_append(&name, "]");
 
-  Type t = { ValueKindArray, name.data, .subtype_idx = subtype };
+  Type t = { ValueKindArray, name.data, .size = len * subtype->size, .subtype_idx = subtype_idx };
   int type_idx = symtbl_insert_type(tbl, t);
   return (Value) { type_idx, .arr = { len, data }};
 }
+
+// Value make_func_const(SymTbl* tbl, StmtFnDecl* decl, char* src) {
+//   IntVec params_types = {0};
+
+//   // build the params
+//   String name = {0};
+//   string_append(&name, "fn(");
+//   VEC_FOREACH(FuncParam, decl.params) {
+//     Token* type = it.type;
+//     char* start = src + type->offset;
+//     int len = type->len;
+
+//     string_append_n(&name, start, len);
+//     VEC_PUSH(params_types, )
+//   }
+//   string_append(&name, ")");
+  
+// }
 
 void symtbl_insert(SymTbl* tbl, char* str, size_t len, Value val) {
   Scope* scope = &tbl->scopes.data[tbl->scopes.len-1];
@@ -186,9 +223,9 @@ void symtbl_pop_scope(SymTbl* tbl) {
   (void) VEC_POP(tbl->scopes);
 }
 
-const Type TYPE_BOOL  = {ValueKindBool,  "bool", 0};
-const Type TYPE_INT   = {ValueKindInt, "int", 0};
-const Type TYPE_FLOAT = {ValueKindFloat, "float", 0};
+const Type TYPE_BOOL  = {ValueKindBool,  "bool", sizeof(bool), 0};
+const Type TYPE_INT   = {ValueKindInt, "int", sizeof(int), 0};
+const Type TYPE_FLOAT = {ValueKindFloat, "float", sizeof(double), 0};
 
 SymTbl symtbl_init() {
   SymTbl t = {0};
