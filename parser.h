@@ -2,6 +2,11 @@
 
 // TODO: consider storing indexes to Tokens instead of pointers
 
+// TODO: use these instead of int
+typedef int ExprId;
+typedef int StmtId;
+typedef int TypeId;
+
 typedef enum {
   ExprKindLiteral,
   ExprKindVariable,
@@ -43,7 +48,7 @@ typedef struct {
 
 typedef struct {
   int callee_idx;
-  IntVec params;
+  IntVec args;
 } ExprCall;
 
 typedef struct {
@@ -57,18 +62,31 @@ typedef struct {
   };
 } Expr;
 
+#define PRIMITIVES_LIST \
+  X(Int) \
+  X(Float) \
+  X(Bool) \
+
+#define X(Name) TypeAnnKind##Name,
 typedef enum {
-  TypeAnnKindInt,
-  TypeAnnKindFloat,
-  TypeAnnKindBool,
+  PRIMITIVES_LIST
   TypeAnnKindArray,
   TypeAnnKindFunc,
   TypeAnnKindUnknown,
 } TypeAnnKind;
+#undef X
+
 
 typedef struct {
-  IntVec params;
+  Token* name;
+  int type_idx;
+} FnParam;
+VEC_DEF(FnParam);
+
+typedef struct {
+  FnParamVec params;
   int ret_idx;
+  int block_idx;
 } TypeAnnFunc;
 
 typedef struct {
@@ -104,15 +122,7 @@ typedef struct {
 
 typedef struct {
   Token* name;
-  Token* type;
-} FuncParam;
-VEC_DEF(FuncParam);
-
-typedef struct {
-  Token* name;
-  FuncParamVec params;
-  Token* ret_type;
-  int block_idx;
+  int type_idx;
 } StmtFnDecl;
 
 typedef struct {
@@ -244,6 +254,10 @@ Token* parser_eat_if(Parser* p, TokenKind match) {
   else return NULL;
 }
 
+TypeAnn* parser_get_type(Parser* p, int idx) {
+  return &p->types.data[idx];
+}
+
 Expr* parser_get_expr(Parser* p, int idx) {
   return &p->exprs.data[idx];
 }
@@ -268,7 +282,7 @@ void parser_clear(Parser *p) {
     if (e->kind == ExprKindLiteral && e->lit.kind == LiteralKindArray) {
       VEC_FREE(e->lit.arr.expr_ids);
     } else if (e->kind == ExprKindCall) {
-      VEC_FREE(e->call.params);
+      VEC_FREE(e->call.args);
     }
   }
   p->exprs.len = 0;
@@ -276,7 +290,6 @@ void parser_clear(Parser *p) {
   VEC_FOR(p->stmts) {
     Stmt* s = &p->stmts.data[i];
     if (s->kind == StmtKindBlock) VEC_FREE(s->block.stmt_ids);
-    else if (s->kind == StmtKindFnDecl) VEC_FREE(s->fn_decl.params);
   }
   p->stmts.len = 0;
   p->top_lvl_stmts.len = 0;
@@ -368,8 +381,8 @@ Expr binary(int lhs, Token* op, int rhs) {
   return (Expr) { ExprKindBinary, .bin = bin };
 }
 
-Expr call(int lhs, IntVec params) {
-  ExprCall call = {lhs, params};
+Expr call(int lhs, IntVec args) {
+  ExprCall call = {lhs, args};
   return (Expr) { ExprKindCall, .call = call };
 }
 
@@ -476,9 +489,9 @@ int parse_expr(Parser* p, int prec_lvl) {
           // no args
           lhs = parser_push_expr(p, call(lhs, (IntVec) {0}));
         } else {
-          IntVec params = collect_expr_list(p, TokComma, TokParenRight, "expect ',' or parenthesis closing ')' for function call");
-          if (params.len == 0) return -1;
-          lhs = parser_push_expr(p, call(lhs, params));
+          IntVec args = collect_expr_list(p, TokComma, TokParenRight, "expect ',' or parenthesis closing ')' for function call arguments");
+          if (args.len == 0) return -1;
+          lhs = parser_push_expr(p, call(lhs, args));
         }
       } else {
         lhs = parser_push_expr(p, unary(op, lhs));
@@ -573,10 +586,11 @@ int parse_type(Parser* p) {
       // function
 
       // careful: memory leak if return early  
-      IntVec params = {0};
+      FnParamVec params = {0};
       
       while (!parser_is_at_end(p)) {
-        int param = parse_type(p);
+        int param_idx = parse_type(p);
+        FnParam param = {NULL, param_idx};
         VEC_PUSH(params, param);
 
         Token* t = parser_peek(p);
@@ -603,7 +617,7 @@ int parse_type(Parser* p) {
         ret_idx = parse_type(p);
       }
 
-      TypeAnnFunc func = { params, ret_idx };
+      TypeAnnFunc func = { params, ret_idx, -1 };
       t = (TypeAnn) { TypeAnnKindFunc, .func = func };
     } break;
 
@@ -716,7 +730,7 @@ int parse_func_decl(Parser* p) {
 
   if (parser_eat_match(p, TokParenLeft, "expect open parenthesis '(' after fn keyword") == NULL) return -1;
 
-  FuncParamVec params = {0};
+  FnParamVec params = {0};
 
   while(!parser_is_at_end(p)) {
     // no params
@@ -729,11 +743,10 @@ int parse_func_decl(Parser* p) {
     if (name == NULL) goto error;
     if (parser_eat_match(p, TokColon, "expect ':' after function parameter name") == NULL) goto error;
 
-    // TODO: should parse for type
-    Token* type_name = parser_eat_match(p, TokIdent, "expect type annotation after function parameter name");
-    if (type_name == NULL) goto error;
+    int type_idx = parse_type(p);
+    if (type_idx == -1) goto error;
 
-    FuncParam param = { name, type_name }; 
+    FnParam param = { name, type_idx }; 
     VEC_PUSH(params, param);
 
     Token* t = parser_eat(p);
@@ -747,26 +760,32 @@ int parse_func_decl(Parser* p) {
     }
   }
 
-  Token* ret = NULL;
+  int ret_idx = -1;
   Token* arrow = parser_eat_if(p, TokArrow);
   if (arrow != NULL) {
-    ret = parser_eat_match(p, TokIdent, "expect return type after function arrow");
-    if (ret == NULL) goto error;
+    ret_idx = parse_type(p);
+    if (ret_idx == -1) goto error;
   }
 
   int block_idx = parse_block(p);
+
+  // TODO: this sucks and won't work
   IntVec ids = parser_get_stmt(p, block_idx)->block.stmt_ids;
   int last_stmt = ids.len > 0 ? ids.data[ids.len-1] : -1;
 
   // if we don't have a return type, we don't care
   // if we have a return value and block is empty, it is an error
   // if we have some stmts but no return value, it is an error
-  if (ret != NULL && (last_stmt == -1 || parser_get_stmt(p, last_stmt)->kind != StmtKindReturn)) {
+  if (ret_idx != -1 && (last_stmt == -1 || parser_get_stmt(p, last_stmt)->kind != StmtKindReturn)) {
     parse_log_err(p, "expect return expression at end of function implementation");
     goto error;
   }
 
-  StmtFnDecl func = { func_name, params, ret, block_idx };
+  // build type
+  TypeAnnFunc type = {params, ret_idx, block_idx};
+  int type_idx = parser_push_type(p, (TypeAnn) { TypeAnnKindFunc, .func = type });
+
+  StmtFnDecl func = { func_name, type_idx };
   return parser_push_stmt(p, (Stmt) { StmtKindFnDecl, .fn_decl = func });
 
   error:
@@ -808,8 +827,17 @@ int parse_stmt(Parser* p) {
   return stmt;
 }
 
+void parser_init_types(Parser* p) {
+  TypeAnn t;
+
+  #define X(Name) t.kind = TypeAnnKind##Name; VEC_PUSH(p->types, t);
+  PRIMITIVES_LIST
+  #undef X
+}
+
 void parse(Parser* p, char* str) {
   parser_clear(p);
+  parser_init_types(p);
 
   TokenVec tokens = tokenize(str);
   p->src = str;

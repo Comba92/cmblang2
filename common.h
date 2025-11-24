@@ -26,7 +26,7 @@ typedef double    f64;
 { \
   if ((_vec).len >= (_vec).cap) { \
     (_vec).cap = (_vec).cap == 0 ? VEC_DEFAULT_CAP : (_vec).cap * 2; \
-    (_vec).data = realloc((_vec).data, (_vec).cap * sizeof(_val)); \
+    (_vec).data = realloc((_vec).data, (_vec).cap * sizeof((_val))); \
   } \
   (_vec).data[(_vec).len++] = (_val); \
 }

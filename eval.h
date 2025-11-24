@@ -343,7 +343,7 @@ void eval_block(Context* ctx, IntVec stmts) {
           eval_log_err(ctx, "undeclared variable");
           return;
         } else {
-          Value res = eval_expr(ctx, s->decl.rhs_idx);
+          Value res = eval_expr(ctx, s->assign.rhs_idx);
           if (!symtbl_type_eq(tbl, var, &res)) {
             eval_log_err(ctx, "assignment of different type");
             return;
