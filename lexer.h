@@ -83,10 +83,9 @@ typedef struct {
   X(return, TokReturn) \
   X(struct, TokStruct) \
   X(as, TokAs) \
-
-  // X(int, TokInt) \
-  // X(float, TokFloat) \
-  // X(bool, TokBool) \
+  X(int, TokInt) \
+  X(float, TokFloat) \
+  X(bool, TokBool) \
 
 #define X(name, tok) { #name, sizeof(#name)-1, tok },
 static const KeywordData KEYWORDS[] = {

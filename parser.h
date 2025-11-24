@@ -1,5 +1,4 @@
 #pragma once
-#include "table.h"
 
 // TODO: consider storing indexes to Tokens instead of pointers
 
@@ -59,6 +58,30 @@ typedef struct {
 } Expr;
 
 typedef enum {
+  TypeAnnKindInt,
+  TypeAnnKindFloat,
+  TypeAnnKindBool,
+  TypeAnnKindArray,
+  TypeAnnKindFunc,
+  TypeAnnKindUnknown,
+} TypeAnnKind;
+
+typedef struct {
+  IntVec params;
+  int ret_idx;
+} TypeAnnFunc;
+
+typedef struct {
+  TypeAnnKind kind;
+  union {
+    LiteralKind prim;
+    int inner_idx;
+    TypeAnnFunc func;
+  };
+} TypeAnn;
+VEC_DEF(TypeAnn);
+
+typedef enum {
   StmtKindExpr,
   StmtKindDecl,
   StmtKindFnDecl,
@@ -75,7 +98,7 @@ VEC_DEF(Stmt);
 
 typedef struct {
   Token* name;
-  Type type;
+  int type_idx;
   int rhs_idx;
 } StmtDecl;
 
@@ -155,6 +178,8 @@ typedef struct  {
   TokenVec tokens;
   int curr_token;
   
+  // TODO: types should be unique; would be a great idea to store them in a hash table
+  TypeAnnVec types;
   ExprVec exprs;
   StmtVec stmts;
   IntVec top_lvl_stmts;
@@ -177,8 +202,13 @@ int parser_push_expr(Parser* p, Expr e) {
   return p->exprs.len-1;
 }
 
-int parser_push_stmt(Parser* p, Stmt e) {
-  VEC_PUSH(p->stmts, e);
+int parser_push_type(Parser* p, TypeAnn t) {
+  VEC_PUSH(p->types, t);
+  return p->types.len-1;
+}
+
+int parser_push_stmt(Parser* p, Stmt s) {
+  VEC_PUSH(p->stmts, s);
   return p->stmts.len-1;
 }
 
@@ -227,6 +257,12 @@ void parser_clear(Parser *p) {
   p->tokens.len = 0;
   p->curr_token = 0;
 
+  VEC_FOR(p->types) {
+    TypeAnn* t = &p->types.data[i];
+    if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params);
+  }
+  p->types.len = 0;
+
   VEC_FOR(p->exprs) {
     Expr* e = &p->exprs.data[i];
     if (e->kind == ExprKindLiteral && e->lit.kind == LiteralKindArray) {
@@ -240,7 +276,7 @@ void parser_clear(Parser *p) {
   VEC_FOR(p->stmts) {
     Stmt* s = &p->stmts.data[i];
     if (s->kind == StmtKindBlock) VEC_FREE(s->block.stmt_ids);
-    else if (s->kind == StmtKindFnDecl)  VEC_FREE(s->fn_decl.params);
+    else if (s->kind == StmtKindFnDecl) VEC_FREE(s->fn_decl.params);
   }
   p->stmts.len = 0;
   p->top_lvl_stmts.len = 0;
@@ -360,7 +396,11 @@ IntVec collect_expr_list(Parser* p, TokenKind separator, TokenKind terminator, c
     }
   }
 
-  if (parser_eat_match(p, terminator, err) == NULL) return (IntVec) {0};
+  if (parser_eat_match(p, terminator, err) == NULL) {
+    VEC_FREE(expr_ids);
+    return (IntVec) {0};
+  }
+
   return expr_ids;
 }
 
@@ -405,23 +445,7 @@ int parse_expr(Parser* p, int prec_lvl) {
 
       IntVec exprs = collect_expr_list(p, TokComma, TokBraceRight, "expected ',' or brace closing ']' for array literal");
       if (exprs.len == 0) return -1;
-      // IntVec expr_ids = {0};
-  
-      // while (!parser_is_at_end(p)) {
-      //   int val = parse_expr(p, 0);
-      //   VEC_PUSH(expr_ids, val);
 
-      //   t = parser_eat(p);
-      //   if (t->kind == TokBraceRight) break;
-      //   else if (t->kind == TokComma) {
-      //     // we can have a comma at the end without any expression after
-      //     if (parser_peek(p)->kind == TokBraceRight) { parser_eat(p); break; }
-      //   } else {
-      //     VEC_FREE(expr_ids);
-      //     parse_log_err(p, "expected ',' or brace closing ']' for array literal");
-      //     return -1;
-      //   }
-      // }
       return parser_push_expr(p, literal_array(exprs));
       break;
 
@@ -509,24 +533,86 @@ int parse_decl(Parser* p) {
   parser_eat(p);
   int rhs = parse_expr(p, 0);
 
-  StmtDecl decl = {name, {0}, rhs};
+  StmtDecl decl = {name, -1, rhs};
   Stmt stmt = (Stmt) { StmtKindDecl, .decl = decl };
   return parser_push_stmt(p, stmt);
 }
 
-Type parse_type(Parser* p) {
+int parse_type(Parser* p) {
   // primitive
   // function
   // struct
   // array
 
-  // while (!parser_is_at_end(p)) {
-  //   Token* t = parser_eat(p);
+  Token* tok = parser_eat(p);
 
-  //   switch (t->kind) {
+  TypeAnn t;
+  switch (tok->kind) {
+    case TokInt: t.kind = TypeAnnKindInt; break;
+    case TokFloat: t.kind = TypeAnnKindFloat; break;
+    case TokBool: t.kind = TypeAnnKindBool; break;
 
-  //   }
-  // }
+    case TokIdent: {
+      // this might be any kind of user defined type
+      // TODO: should return unknown type?
+      parse_log_err(p, "user defined types not yet supported");
+      return -1;
+    } break;
+
+    case TokBraceLeft: {
+      // array
+
+      // parse inner type
+      int inner = parse_type(p);
+      if (parser_eat_match(p, TokBraceRight, "expect closing brace ']' in array type annotation") == NULL) return -1;
+
+      t = (TypeAnn) { TypeAnnKindArray, .inner_idx = inner };
+    } break;
+
+    case TokParenLeft: {
+      // function
+
+      // careful: memory leak if return early  
+      IntVec params = {0};
+      
+      while (!parser_is_at_end(p)) {
+        int param = parse_type(p);
+        VEC_PUSH(params, param);
+
+        Token* t = parser_peek(p);
+        if (t->kind == TokParenRight) break;
+        else if (t->kind == TokComma) {
+          parser_eat(p);
+          // we can have a separator at the end without any expression after
+          if (parser_peek(p)->kind == TokParenRight) break;
+        } else {
+          VEC_FREE(params);
+          parse_log_err(p, "expect comma ',' or closing parenthesis ')' in function type annotation");
+          return -1;
+        }
+      }
+
+      if (parser_eat_match(p, TokParenRight, "expect closing parenthesis ')' at end of function type annotation") == NULL) {
+        VEC_FREE(params);
+        return -1;
+      }
+
+      // TODO: function annotation might always require an arrow 
+      int ret_idx = -1;
+      if (parser_eat_if(p, TokArrow) != NULL) {
+        ret_idx = parse_type(p);
+      }
+
+      TypeAnnFunc func = { params, ret_idx };
+      t = (TypeAnn) { TypeAnnKindFunc, .func = func };
+    } break;
+
+    default: 
+      parse_log_err(p, "invalid type annotation");
+      return -1;
+  }
+
+  return parser_push_type(p, t);
 }
 
 int parse_decl_annot(Parser* p) {
@@ -534,7 +620,7 @@ int parse_decl_annot(Parser* p) {
 
   // eat ':'
   parser_eat(p);
-  Type type = parse_type(p);
+  int type = parse_type(p);
 
   if (parser_eat_match(p, TokAssign, "expect '=' after variable name and type annotation") == NULL) return -1;
   int rhs = parse_expr(p, 0);
@@ -622,7 +708,7 @@ int parse_return(Parser* p) {
   return parser_push_stmt(p, stmt);
 }
 
-int parse_fn_decl(Parser* p) {
+int parse_func_decl(Parser* p) {
   // eat 'fn'
   parser_eat(p);
   Token* func_name = parser_eat_match(p, TokIdent, "expect function name after 'fn' keyword");
@@ -695,11 +781,12 @@ int parse_stmt(Parser* p) {
     case TokCurlyLeft: stmt = parse_block(p); break;
     case TokIf: stmt = parse_if_else(p); break;
     case TokWhile: stmt = parse_while(p); break;
-    case TokFn: stmt = parse_fn_decl(p); break;
+    case TokFn: stmt = parse_func_decl(p); break;
     case TokReturn: stmt = parse_return(p); break;
 
     default: {
       bool is_ident = parser_peek(p)->kind == TokIdent; 
+
       Token* next = parser_peek_nth(p, 1);
       if (is_ident && next->kind == TokAssign)
         stmt = parse_assign(p);

@@ -3,6 +3,7 @@
 #include "parser.h"
 // #include "eval.h"
 // #include "table.h"
+#include "type_check.h"
 
 int main() {
   printf("Hello!\n");
