@@ -26,11 +26,11 @@ void symtbl_insert(Symtbl* tbl, int type_idx, Token* tok) {
   char* start = tbl->parser->src + tok->offset;
   int len = tok->len;
 
-  SymVec scope = *symtbl_top(tbl);
+  SymVec* scope = symtbl_top(tbl);
 
   int present_idx = -1;
-  VEC_FOR(scope) {
-    Sym it = scope.data[i];
+  VEC_FOR(*scope) {
+    Sym it = scope->data[i];
     if (strncmp(it.name, start, len) == 0) {
       present_idx = i;
       break;
@@ -41,10 +41,9 @@ void symtbl_insert(Symtbl* tbl, int type_idx, Token* tok) {
     // we own the identifier name string
     char* name = str_clone(start, len);
     Sym e = { name, .type_idx = type_idx };
-    printf("Inserting %s with type %d\n", name, type_idx);
-    VEC_PUSH(scope, e);
+    VEC_PUSH(*scope, e);
   } else {
-    scope.data[present_idx].type_idx = type_idx;
+    scope->data[present_idx].type_idx = type_idx;
   }
 }
 

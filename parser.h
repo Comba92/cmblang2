@@ -269,9 +269,9 @@ Stmt* parser_get_stmt(Parser* p, int idx) {
 }
 
 void parser_clear(Parser *p) {
-  p->src = NULL;
   p->tokens.len = 0;
   p->curr_token = 0;
+  VEC_FREE(p->tokens);
 
   // do not free types
   // VEC_FOR(p->types) {
@@ -838,21 +838,20 @@ int parse_stmt(Parser* p) {
   return stmt;
 }
 
-void parser_init_types(Parser* p) {
+Parser parser_init(char* src) {
+  Parser p = {0};
+  p.src = src;
   TypeAnn t;
-
-  #define X(Name) t.kind = TypeAnnKind##Name; VEC_PUSH(p->types, t);
+  
+  #define X(Name) t.kind = TypeAnnKind##Name; VEC_PUSH(p.types, t);
   PRIMITIVES_LIST
   #undef X
+
+  return p;
 }
 
-void parse(Parser* p, char* str) {
+void parse(Parser* p) {
   parser_clear(p);
-  parser_init_types(p);
-
-  TokenVec tokens = tokenize(str);
-  p->src = str;
-  p->tokens = tokens;
-
+  p->tokens = tokenize(p->src);
   while (!parser_is_at_end(p)) VEC_PUSH(p->top_lvl_stmts, parse_stmt(p));
 }

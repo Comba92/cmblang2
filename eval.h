@@ -2,9 +2,9 @@
 #include "typecheck.h"
 
 typedef enum {
-  ValueKindBool = 0,
-  ValueKindInt = 1,
-  ValueKindFloat = 2,
+  ValueKindInt,
+  ValueKindFloat,
+  ValueKindBool,
   ValueKindArray,
   ValueKindFunc,
   ValueKindErr,
@@ -57,27 +57,21 @@ typedef struct {
   Value val;
 } EnvVar;
 VEC_DEF(EnvVar);
-VEC_DEF_NAMED(Env, EnvVarVec);
+VEC_DEF_NAMED(EnvVarScopes, EnvVarVec);
 
-typedef struct {
-  Parser* p;
-  Env env;
-  const char* err;
-} Context;
-
-EnvVarVec* env_top(Env* env) {
+EnvVarVec* env_top(EnvVarScopes* env) {
   return &env->data[env->len-1];
 }
 
-void env_insert(Env* env, char* src, Token* tok, Value val) {
+void env_insert(EnvVarScopes* env, char* src, Token* tok, Value val) {
   char* start = src + tok->offset;
   int len = tok->len;
 
-  EnvVarVec scope = *env_top(env);
+  EnvVarVec* scope = env_top(env);
 
   int present_idx = -1;
-  VEC_FOR(scope) {
-    EnvVar it = scope.data[i];
+  VEC_FOR(*scope) {
+    EnvVar it = scope->data[i];
     if (strncmp(it.name, start, len) == 0) {
       present_idx = i;
       break;
@@ -88,13 +82,13 @@ void env_insert(Env* env, char* src, Token* tok, Value val) {
     // we own the identifier name string
     char* name = str_clone(start, len);
     EnvVar v = { name, val };
-    VEC_PUSH(scope, v);
+    VEC_PUSH(*scope, v);
   } else {
-    scope.data[present_idx].val = val;
+    scope->data[present_idx].val = val;
   }
 }
 
-Value* env_find(Env* env, char* src, Token* tok) {
+Value* env_find(EnvVarScopes* env, char* src, Token* tok) {
   char* start = src + tok->offset;
   int len = tok->len;
 
@@ -119,15 +113,29 @@ Value* env_find(Env* env, char* src, Token* tok) {
   }
 }
 
-void env_push_scope(Env* env) {
+void env_push_scope(EnvVarScopes* env) {
   VEC_PUSH(*env, (EnvVarVec) {0});
 }
 
-void env_pop_scope(Env* env) {
+void env_pop_scope(EnvVarScopes* env) {
   EnvVarVec* scope = env_top(env);
   // free(scope->data);
   scope->len = 0;
   (void) VEC_POP(*env);
+}
+
+typedef struct {
+  Parser* p;
+  EnvVarScopes env;
+  const char* err;
+} Context;
+
+Context ctx_init(Parser* p) {
+  Context ctx = {0};
+  ctx.p = p;
+  // global scope
+  env_push_scope(&ctx.env);
+  return ctx;
 }
 
 void eval_log_err(Context* c, const char* err) {
@@ -136,7 +144,7 @@ void eval_log_err(Context* c, const char* err) {
 }
 
 Value eval_expr(Context* ctx, int expr_id) {
-  Env* env = &ctx->env;
+  EnvVarScopes* env = &ctx->env;
   Parser* p = ctx->p;
 
   Expr* e = parser_get_expr(p, expr_id);
@@ -209,6 +217,7 @@ Value eval_expr(Context* ctx, int expr_id) {
       Value rhs = eval_expr(ctx, un.expr);
 
       Value v = {0};
+      v.kind = rhs.kind;
       switch (rhs.kind) {
         case ValueKindInt: {
           switch(un.op->kind) {
@@ -234,7 +243,7 @@ Value eval_expr(Context* ctx, int expr_id) {
             default:
               eval_log_err(ctx, "invalid bool unary operator");
               return make_err_value();
-          } 
+          }
         } break;
 
         default:
@@ -258,6 +267,30 @@ Value eval_expr(Context* ctx, int expr_id) {
       Value v = {0};
       switch (lhs.kind) {
         case ValueKindInt: {
+          switch(bin.op->kind) {
+            case TokAdd:
+            case TokSub:
+            case TokMul:
+            case TokDiv:
+            case TokRem:
+            case TokExp:
+              v.kind = ValueKindInt;
+              break;
+
+            case TokEq:
+            case TokNotEq:
+            case TokGreat:
+            case TokLess:
+            case TokGreatEq:
+            case TokLessEq:
+              v.kind = ValueKindBool;
+              break;
+
+            default:
+              eval_log_err(ctx, "invalid numeric binary operator");
+              return make_err_value();
+          }
+
           switch(bin.op->kind) {
             case TokAdd: v.i = lhs.i + rhs.i; break;
             case TokSub: v.i = lhs.i - rhs.i; break;
@@ -283,6 +316,30 @@ Value eval_expr(Context* ctx, int expr_id) {
 
         case ValueKindFloat: {
           switch(bin.op->kind) {
+            case TokAdd:
+            case TokSub:
+            case TokMul:
+            case TokDiv:
+            case TokRem:
+            case TokExp:
+              v.kind = ValueKindFloat;
+              break;
+
+            case TokEq:
+            case TokNotEq:
+            case TokGreat:
+            case TokLess:
+            case TokGreatEq:
+            case TokLessEq:
+              v.kind = ValueKindBool;
+              break;
+
+            default:
+              eval_log_err(ctx, "invalid numeric binary operator");
+              return make_err_value();
+          }
+
+          switch(bin.op->kind) {
             case TokAdd: v.f = lhs.f + rhs.f; break;
             case TokSub: v.f = lhs.f - rhs.f; break;
             case TokMul: v.f = lhs.f * rhs.f; break;
@@ -306,6 +363,7 @@ Value eval_expr(Context* ctx, int expr_id) {
         }
 
         case ValueKindBool: {
+          v.kind = ValueKindBool;
           switch(bin.op->kind) {
             case TokAnd:      v.b = lhs.b && rhs.b; break;
             case TokOr:       v.b = lhs.b || rhs.b; break;
@@ -334,7 +392,7 @@ Value eval_expr(Context* ctx, int expr_id) {
 }
 
 void eval_block(Context* ctx, IntVec stmts) {
-  Env* env = &ctx->env;
+  EnvVarScopes* env = &ctx->env;
   Parser* p = ctx->p;
 
   VEC_FOR(stmts) {
@@ -405,8 +463,6 @@ void eval_block(Context* ctx, IntVec stmts) {
   }
 }
  
-void eval(Parser* p) {
-  Env env = {0};
-  Context ctx = { p, env, NULL };
-  eval_block(&ctx, p->top_lvl_stmts);
+void eval(Context* c) {
+  eval_block(c, c->p->top_lvl_stmts);
 }

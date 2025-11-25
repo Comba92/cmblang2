@@ -33,24 +33,24 @@
 int main() {
   printf("Hello!\n");
 
-  #define X(Name) printf("%s size: %lld bytes\n", #Name, sizeof(Name));
+  #define X(Name) printf("%s size: %ld bytes\n", #Name, sizeof(Name));
   DEBUG_LIST
   #undef X
 
   #define BUF_SIZE 1024
   char buf[BUF_SIZE];
 
-  Parser parser = {0};
+  Parser parser = parser_init(&buf);
   Symtbl tbl = symtbl_init(&parser);
+  Context ctx = ctx_init(&parser);
 
   while(1) {
     fputs("> ", stdout);
     stdin_read_line(buf, BUF_SIZE);
 
-    parse(&parser, buf);
-
-    if (typecheck(&tbl)) {
-      // eval(&parser);
+    parse(&parser);
+    if (parser.err == NULL && typecheck(&tbl)) {
+      eval(&ctx);
     }
 
     // VEC_FOR(parser.tokens) token_dbg(parser.tokens, i);
