@@ -325,10 +325,10 @@ void eval_block(Context* ctx, IntVec stmts) {
       } break;
 
       case StmtKindFnDecl: {
-        // char* start = p->src + s->fn_decl.name->offset;
-        // int len = s->fn_decl.name->len;
+        // char* start = p->src + s->func_decl.name->offset;
+        // int len = s->func_decl.name->len;
 
-        // Value val = make_func_const(ctx, &s->fn_decl);
+        // Value val = make_func_const(ctx, &s->func_decl);
 
         // symtbl_insert(tbl, start, len, val);
       } break;

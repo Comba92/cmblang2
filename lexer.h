@@ -251,7 +251,7 @@ TokenVec tokenize(char* str) {
           while (str[len] != '\0' && (isalnum(str[len]) || str[len] == '_')) len++;
           t = (Token) {TokIdent, column, len};
         } else {
-          // handle error
+          // TODO: handle error
           fprintf(stderr, "[LEX ERR] Invalid token (%c) at col = %d\n", c, column);
           return (TokenVec) {0};
         }

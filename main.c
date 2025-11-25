@@ -33,9 +33,9 @@
 int main() {
   printf("Hello!\n");
 
-  #define X(Name) printf("%s size: %ld bytes\n", #Name, sizeof(Name));
-  DEBUG_LIST
-  #undef X
+  // #define X(Name) printf("%s size: %ld bytes\n", #Name, sizeof(Name));
+  // DEBUG_LIST
+  // #undef X
 
   #define BUF_SIZE 1024
   char buf[BUF_SIZE];
@@ -56,10 +56,6 @@ int main() {
     // VEC_FOR(parser.tokens) token_dbg(parser.tokens, i);
     // VEC_FOR(parser.exprs) expr_dbg(parser.exprs, i);
     // VEC_FOR(parser.stmts) stmt_dbg(parser.stmts, i);
-
-    // if (parser.err == NULL) {
-    //   eval(&parser, &ctx);
-    // }
   }
 
   return 0;

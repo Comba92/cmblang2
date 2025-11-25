@@ -38,6 +38,9 @@ typedef double    f64;
   } \
 } \
 
+#define VEC_FIRST(_vec) (_vec).data[0]
+#define VEC_LAST (_vec) (_vec).data[(_vec).len-1]
+
 #define VEC_DEF_NAMED(_name, _type) \
 typedef struct { \
   _type* data; \
