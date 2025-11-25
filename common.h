@@ -8,8 +8,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// TODO: size_t hunt
-
 typedef uint8_t   u8;
 typedef int8_t    i8;
 typedef uint16_t  u16;
@@ -43,11 +41,11 @@ typedef double    f64;
 #define VEC_DEF_NAMED(_name, _type) \
 typedef struct { \
   _type* data; \
-  size_t len, cap; \
+  int len, cap; \
 } _name
 #define VEC_DEF(_type) VEC_DEF_NAMED(_type##Vec, _type)
 
-#define VEC_FOR_I(_it, _vec) for(size_t _it=0; _it < (_vec).len; ++_it)
+#define VEC_FOR_I(_it, _vec) for(int _it=0; _it < (_vec).len; ++_it)
 #define VEC_FOR(_vec) VEC_FOR_I(i, _vec)
 
 #define VEC_FOREACH_IT(_type, _it, _vec) for (_type* _it = (_vec).data; _it < (_vec).data + (_vec).len; ++_it)
@@ -56,7 +54,7 @@ typedef struct { \
 VEC_DEF_NAMED(IntVec, int);
 VEC_DEF_NAMED(String, char);
 
-char* str_clone(char* str, size_t len) {
+char* str_clone(char* str, int len) {
   char* res = (char*) malloc(len + 1);
   memcpy(res, str, len);
   res[len] = '\0';

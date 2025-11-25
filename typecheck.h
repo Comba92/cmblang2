@@ -1,3 +1,5 @@
+#pragma once
+
 typedef struct {
   char* name;
   int type_idx;
@@ -11,7 +13,7 @@ typedef struct {
   const char* err;
 } Symtbl;
 
-void eval_log_err(Symtbl* tbl, const char* err) {
+void typecheck_err(Symtbl* tbl, const char* err) {
   tbl->err = err;
   fprintf(stderr, "[TYPE ERR] %s\n", err); 
 }
@@ -24,25 +26,25 @@ void symtbl_insert(Symtbl* tbl, int type_idx, Token* tok) {
   char* start = tbl->parser->src + tok->offset;
   int len = tok->len;
 
-  SymVec* scope = symtbl_top(tbl);
+  SymVec scope = *symtbl_top(tbl);
 
-  Sym* present = NULL;
-  VEC_FOR(*scope) {
-    Sym* it = &scope->data[i];
-    if (strncmp(it->name, start, len) == 0) {
-      present = it;
+  int present_idx = -1;
+  VEC_FOR(scope) {
+    Sym it = scope.data[i];
+    if (strncmp(it.name, start, len) == 0) {
+      present_idx = i;
       break;
     }
   }
 
-  if (present == NULL) {
+  if (present_idx == -1) {
     // we own the identifier name string
     char* name = str_clone(start, len);
-    Sym e = { name, type_idx };
+    Sym e = { name, .type_idx = type_idx };
     printf("Inserting %s with type %d\n", name, type_idx);
-    VEC_PUSH(*scope, e);
+    VEC_PUSH(scope, e);
   } else {
-    present->type_idx = type_idx;
+    scope.data[present_idx].type_idx = type_idx;
   }
 }
 
@@ -52,9 +54,9 @@ int symtbl_find(Symtbl* tbl, Token* tok) {
 
   Sym* present = NULL;
   for(int i=tbl->scopes.len-1; i >= 0; i--) {
-    SymVec* scope = &tbl->scopes.data[i];
+    SymVec scope = tbl->scopes.data[i];
 
-    VEC_FOREACH(Sym, *scope) {
+    VEC_FOREACH(Sym, scope) {
       if (strncmp(it->name, start, len) == 0) {
         present = it;
         break;
@@ -76,7 +78,7 @@ void symtbl_push_scope(Symtbl* tbl) {
 }
 
 void symtbl_pop_scope(Symtbl* tbl) {
-  SymVec* scope = &tbl->scopes.data[tbl->scopes.len-1];
+  SymVec* scope = symtbl_top(tbl);
   // free(scope->data);
   scope->len = 0;
   (void) VEC_POP(tbl->scopes);
@@ -103,18 +105,24 @@ bool typecheck_eq(Symtbl* tbl, int ta, int tb) {
       return true;
 
     case TypeAnnKindFunc: {
-      TypeAnnFunc* func_a = &type_a->func;
-      TypeAnnFunc* func_b = &type_b->func;
+      TypeAnnFunc func_a = type_a->func;
+      TypeAnnFunc func_b = type_b->func;
 
-      if (func_a->params.len != func_b->params.len) return false;
-      for(int i=0; i<func_a->params.len; i++) {
-        if (!typecheck_eq(tbl, func_a->params.data[i].type_idx, func_b->params.data[i].type_idx))
+      if (func_a.params.len != func_b.params.len) return false;
+      for(int i=0; i<func_a.params.len; i++) {
+        if (!typecheck_eq(tbl, func_a.params.data[i].type_idx, func_b.params.data[i].type_idx))
           return false;
       }
 
-      return func_a->ret_idx == func_b->ret_idx;
-    }
+      return func_a.ret_idx == func_b.ret_idx;
+    } break;
+
+    case TypeAnnKindArray: {
+      return typecheck_eq(tbl, type_a->inner_idx, type_b->inner_idx);
+    } break;
   }
+
+  return false;
 }
 
 int typecheck_expr(Symtbl* tbl, int expr_id) {
@@ -138,7 +146,7 @@ int typecheck_expr(Symtbl* tbl, int expr_id) {
           int prev_type = typecheck_expr(tbl, expr_id);
 
           bool same_type = true;
-          for(size_t i=1; i<ids.len; i++) {
+          for(int i=1; i<ids.len; i++) {
             expr_id = ids.data[i];
             int curr_type = typecheck_expr(tbl, expr_id);
             if (!typecheck_eq(tbl, prev_type, curr_type)) {
@@ -149,7 +157,7 @@ int typecheck_expr(Symtbl* tbl, int expr_id) {
           }
 
           if (!same_type) {
-            eval_log_err(tbl, "array values must be of the same type");
+            typecheck_err(tbl, "array values must be of the same type");
             return -1;
           }
 
@@ -162,7 +170,7 @@ int typecheck_expr(Symtbl* tbl, int expr_id) {
       int type = symtbl_find(tbl, e->ident);
 
       if (type == -1) {
-        eval_log_err(tbl, "undefined variable");
+        typecheck_err(tbl, "undefined variable");
         return -1;
       } else {
         return type;
@@ -177,15 +185,15 @@ int typecheck_expr(Symtbl* tbl, int expr_id) {
       switch (type->kind) {
         case TypeAnnKindInt:
         case TypeAnnKindFloat:
-          if (un.op != TokNot) {
-            eval_log_err(tbl, "invalid numeric unary operation");
+          if (un.op->kind != TokNot) {
+            typecheck_err(tbl, "invalid numeric unary operation");
             return -1;
           }
           else return rhs_type;
 
         case TypeAnnKindBool:
-          if (un.op != TokNot) {
-            eval_log_err(tbl, "invalid boolean unary operation");
+          if (un.op->kind != TokNot) {
+            typecheck_err(tbl, "invalid boolean unary operation");
             return -1;
           }
           else return rhs_type;
@@ -205,7 +213,7 @@ int typecheck_expr(Symtbl* tbl, int expr_id) {
       }
 
       if (!typecheck_eq(tbl, lhs_type, rhs_type)) {
-        eval_log_err(tbl, "invalid numeric unary operation");
+        typecheck_err(tbl, "invalid numeric unary operation");
         return -1;
       } else {
         return lhs_type;
@@ -218,7 +226,7 @@ int typecheck_expr(Symtbl* tbl, int expr_id) {
       TypeAnn* type = parser_get_type(tbl->parser, callee_type);
 
       if (type->kind != TypeAnnKindFunc) {
-        eval_log_err(tbl, "expect function for call operation");
+        typecheck_err(tbl, "expect function for call operation");
         return -1;
       } else {
         return type->func.ret_idx;
@@ -235,36 +243,38 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
     
     switch(s->kind) {
       case StmtKindDecl: {
-        int type_idx = typecheck_expr(tbl, s->decl.rhs_idx);
-        if (!typecheck_eq(tbl, type_idx, s->decl.type_idx)) {
-          eval_log_err(tbl, "assignment of different type");
+        StmtDecl decl = s->decl;
+        int type_idx = typecheck_expr(tbl, decl.rhs_idx);
+        if (!typecheck_eq(tbl, type_idx, decl.type_idx)) {
+          typecheck_err(tbl, "assignment of different type");
           return;
         }
-        symtbl_insert(tbl, type_idx, s->decl.name);
+        symtbl_insert(tbl, type_idx, decl.name);
       } break;
 
       case StmtKindFnDecl: {
-        StmtFnDecl* decl = &s->fn_decl;
-        symtbl_insert(tbl, decl->type_idx, decl->name);
-        TypeAnn* type = parser_get_type(tbl->parser, decl->type_idx);
-        TypeAnnFunc* func = &type->func;
+        StmtFnDecl decl = s->fn_decl;
+        symtbl_insert(tbl, decl.type_idx, decl.name);
+        TypeAnn* type = parser_get_type(tbl->parser, decl.type_idx);
+        TypeAnnFunc func = type->func;
 
         symtbl_push_scope(tbl);
         // push args to scope
-        VEC_FOREACH(FnParam, func->params) symtbl_insert(tbl, it->type_idx, it->name);
-        Stmt* block = parser_get_stmt(tbl->parser, func->block_idx);
+        VEC_FOREACH(FnParam, func.params) symtbl_insert(tbl, it->type_idx, it->name);
+        Stmt* block = parser_get_stmt(tbl->parser, func.block_idx);
         typecheck_block(tbl, block->block.stmt_ids);
         symtbl_pop_scope(tbl);
       } break;
 
       case StmtKindAssign: {
-        int var_type = symtbl_find(tbl, s->assign.var);
+        StmtAssign assign = s->assign;
+        int var_type = symtbl_find(tbl, assign.var);
         if (var_type == -1) {
-          eval_log_err(tbl, "undeclared variable");
+          typecheck_err(tbl, "undeclared variable");
         } else {
-          int expr_type = typecheck_expr(tbl, s->assign.rhs_idx);
+          int expr_type = typecheck_expr(tbl, assign.rhs_idx);
           if (!typecheck_eq(tbl, var_type, expr_type)) {
-            eval_log_err(tbl, "assignment of different type");
+            typecheck_err(tbl, "assignment of different type");
             return;
           }
         }
@@ -280,7 +290,7 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
         StmtIfElse if_else = s->if_else;
         int cond_idx = typecheck_expr(tbl, if_else.cond_idx);
         if (parser_get_type(tbl->parser, cond_idx)->kind != TypeAnnKindBool) {
-          eval_log_err(tbl, "if condition isn't bool");
+          typecheck_err(tbl, "if condition isn't bool");
           return;
         }
 
@@ -299,7 +309,7 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
         StmtWhile wloop = s->wloop;
         int cond_type = typecheck_expr(tbl, wloop.cond_idx);
         if (parser_get_type(tbl->parser, cond_type)->kind != TypeAnnKindBool) {
-          eval_log_err(tbl, "while condition isn't bool");
+          typecheck_err(tbl, "while condition isn't bool");
           return;
         }
 

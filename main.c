@@ -1,16 +1,44 @@
 #include "common.h"
 #include "lexer.h"
 #include "parser.h"
-// #include "eval.h"
-// #include "table.h"
 #include "typecheck.h"
+#include "eval.h"
+
+#define DEBUG_LIST \
+  X(IntVec) \
+  X(Token) \
+  X(LiteralArray) \
+  X(ExprLiteral) \
+  X(ExprUnary) \
+  X(ExprBinary) \
+  X(ExprCall) \
+  X(Expr) \
+  X(FnParam) \
+  X(TypeAnnFunc) \
+  X(TypeAnn) \
+  X(StmtDecl) \
+  X(StmtFnDecl) \
+  X(StmtAssign) \
+  X(StmtBlock) \
+  X(StmtIfElse) \
+  X(StmtWhile) \
+  X(Stmt) \
+  X(Parser) \
+  X(Symtbl) \
+  X(Sym) \
+  X(ValueArray) \
+  X(ValueFunc) \
+  X(Value) \
 
 int main() {
   printf("Hello!\n");
 
+  #define X(Name) printf("%s size: %lld bytes\n", #Name, sizeof(Name));
+  DEBUG_LIST
+  #undef X
+
   #define BUF_SIZE 1024
   char buf[BUF_SIZE];
-  // SymTbl ctx = symtbl_init();
 
   Parser parser = {0};
   Symtbl tbl = symtbl_init(&parser);
@@ -20,7 +48,10 @@ int main() {
     stdin_read_line(buf, BUF_SIZE);
 
     parse(&parser, buf);
-    typecheck(&tbl);
+
+    if (typecheck(&tbl)) {
+      // eval(&parser);
+    }
 
     // VEC_FOR(parser.tokens) token_dbg(parser.tokens, i);
     // VEC_FOR(parser.exprs) expr_dbg(parser.exprs, i);

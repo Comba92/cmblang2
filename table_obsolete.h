@@ -166,7 +166,7 @@ Value make_arr_value(SymTbl* tbl, int subtype_idx, Value* data, int len) {
   
 // }
 
-void symtbl_insert(SymTbl* tbl, char* str, size_t len, Value val) {
+void symtbl_insert(SymTbl* tbl, char* str, int len, Value val) {
   Scope* scope = &tbl->scopes.data[tbl->scopes.len-1];
 
   int present = -1;
@@ -189,7 +189,7 @@ void symtbl_insert(SymTbl* tbl, char* str, size_t len, Value val) {
 }
 
 // TODO: consider making this return index
-Value* symtbl_find(SymTbl* tbl, char* str, size_t len) {
+Value* symtbl_find(SymTbl* tbl, char* str, int len) {
   Symbol* present = NULL;
 
   for(int i=tbl->scopes.len-1; i >= 0; i--) {

@@ -36,13 +36,13 @@ typedef struct {
 } ExprLiteral;
 
 typedef struct {
-  TokenKind op;
+  Token* op;
   int expr;
 } ExprUnary;
 
 typedef struct {
   int lhs_idx;
-  TokenKind op;
+  Token* op;
   int rhs_idx;
 } ExprBinary;
 
@@ -75,7 +75,6 @@ typedef enum {
   TypeAnnKindUnknown,
 } TypeAnnKind;
 #undef X
-
 
 typedef struct {
   Token* name;
@@ -168,10 +167,10 @@ void expr_dbg(ExprVec exprs, int idx) {
     case ExprKindLiteral: printf("literal\n"); break;
     case ExprKindVariable: printf("variable\n"); break;
     case ExprKindUnary:
-      printf("op = %c, rhs = %d\n", e->un.op, e->un.expr);
+      printf("op = %c, rhs = %d\n", e->un.op->kind, e->un.expr);
       break;
     case ExprKindBinary: 
-      printf("lhs = %d, op = %c, rhs = %d\n", e->bin.lhs_idx, e->bin.op, e->bin.rhs_idx);
+      printf("lhs = %d, op = %c, rhs = %d\n", e->bin.lhs_idx, e->bin.op->kind, e->bin.rhs_idx);
       break;
     default: break; 
   }
@@ -223,7 +222,7 @@ int parser_push_stmt(Parser* p, Stmt s) {
 }
 
 bool parser_is_at_end(Parser* p) {
-  return (size_t) p->curr_token >= p->tokens.len;
+  return p->curr_token >= p->tokens.len;
 }
 
 Token* parser_peek(Parser* p) {
@@ -231,7 +230,7 @@ Token* parser_peek(Parser* p) {
 }
 
 Token* parser_peek_nth(Parser* p, int n) {
-  size_t idx = n + p->curr_token;
+  int idx = n + p->curr_token;
   return idx < p->tokens.len ? &p->tokens.data[idx] : &TOKEN_ERR;
 }
 
@@ -254,14 +253,17 @@ Token* parser_eat_if(Parser* p, TokenKind match) {
   else return NULL;
 }
 
+// return by value
 TypeAnn* parser_get_type(Parser* p, int idx) {
   return &p->types.data[idx];
 }
 
+// return by value
 Expr* parser_get_expr(Parser* p, int idx) {
   return &p->exprs.data[idx];
 }
 
+// return by value
 Stmt* parser_get_stmt(Parser* p, int idx) {
   return &p->stmts.data[idx];
 }
@@ -271,11 +273,12 @@ void parser_clear(Parser *p) {
   p->tokens.len = 0;
   p->curr_token = 0;
 
-  VEC_FOR(p->types) {
-    TypeAnn* t = &p->types.data[i];
-    if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params);
-  }
-  p->types.len = 0;
+  // do not free types
+  // VEC_FOR(p->types) {
+  //   TypeAnn* t = &p->types.data[i];
+  //   if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params);
+  // }
+  // p->types.len = 0;
 
   VEC_FOR(p->exprs) {
     Expr* e = &p->exprs.data[i];
@@ -300,6 +303,14 @@ void parser_clear(Parser *p) {
 void parser_free(Parser *p) {
   parser_clear(p);
   VEC_FREE(p->tokens);
+
+  VEC_FOR(p->types) {
+    TypeAnn* t = &p->types.data[i];
+    if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params);
+  }
+  p->types.len = 0;
+  
+  VEC_FREE(p->types);
   VEC_FREE(p->exprs);
   VEC_FREE(p->stmts);
   VEC_FREE(p->top_lvl_stmts);
@@ -311,16 +322,16 @@ typedef struct {
 } PrecLvl;
 #define PREC(_a, _b) (PrecLvl) {(_a), (_b)}
 
-int prefix_lvl(Token* op) {
-  switch (op->kind) {
+int prefix_lvl(Token op) {
+  switch (op.kind) {
     case TokSub: return 30;
     case TokNot: return 29;
     default: return -1;
   }
 }
 
-int postfix_lvl(Token* op) {
-  switch (op->kind) {
+int postfix_lvl(Token op) {
+  switch (op.kind) {
     case TokBraceLeft: return 32;
     case TokParenLeft: return 32;
     default: return -1;
@@ -328,8 +339,8 @@ int postfix_lvl(Token* op) {
 }
 
 // https://www.alphacodingskills.com/rust/notes/rust-operators-precedence.php
-PrecLvl infix_lvl(Token* op) {
-  switch (op->kind) {
+PrecLvl infix_lvl(Token op) {
+  switch (op.kind) {
     case TokAdd:
     case TokSub:
       return PREC(23,24);
@@ -372,12 +383,12 @@ Expr variable(Token* t) {
 }
 
 Expr unary(Token* op, int rhs) {
-  ExprUnary un = {op->kind, rhs};
+  ExprUnary un = {op, rhs};
   return (Expr) { ExprKindUnary, .un = un };
 }
 
 Expr binary(int lhs, Token* op, int rhs) {
-  ExprBinary bin = {lhs, op->kind, rhs};
+  ExprBinary bin = {lhs, op, rhs};
   return (Expr) { ExprKindBinary, .bin = bin };
 }
 
@@ -439,7 +450,7 @@ int parse_expr(Parser* p, int prec_lvl) {
 
     case TokSub:
     case TokNot:
-      int lvl = prefix_lvl(t);
+      int lvl = prefix_lvl(*t);
       int rhs = parse_expr(p, lvl);
       lhs = parser_push_expr(p, unary(t, rhs));
       break;
@@ -469,9 +480,9 @@ int parse_expr(Parser* p, int prec_lvl) {
 
   while (!parser_is_at_end(p)) {
     Token* op = parser_peek(p);
-    if (!tok_is_op(op)) break;
+    if (!tok_is_op(*op)) break;
 
-    int postfix = postfix_lvl(op);
+    int postfix = postfix_lvl(*op);
     if (postfix != -1) {
       if (postfix < prec_lvl) break;
       parser_eat(p);
@@ -500,7 +511,7 @@ int parse_expr(Parser* p, int prec_lvl) {
       continue;
     }
 
-    PrecLvl infix = infix_lvl(op);
+    PrecLvl infix = infix_lvl(*op);
     if (infix.left < prec_lvl) break;
     parser_eat(p);
 
@@ -711,7 +722,7 @@ int parse_return(Parser* p) {
   parser_eat(p);
 
   Stmt stmt;
-  if (tok_is_expr(parser_peek(p))) {
+  if (tok_is_expr(*parser_peek(p))) {
     int expr = parse_expr(p, 0);
     stmt = (Stmt) { StmtKindReturn, .expr_idx = expr };
   } else {

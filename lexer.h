@@ -65,7 +65,7 @@ typedef enum {
 
 typedef struct {
   const char* name;
-  size_t len; 
+  int len; 
   TokenKind kind;
 } KeywordData;
 
@@ -92,7 +92,7 @@ static const KeywordData KEYWORDS[] = {
   KEYWORDS_LIST
 };
 #undef X
-const size_t KEYWORDS_LEN = sizeof(KEYWORDS) / sizeof(KeywordData);
+const int KEYWORDS_LEN = sizeof(KEYWORDS) / sizeof(KeywordData);
 
 typedef struct {
   TokenKind kind;
@@ -111,38 +111,38 @@ Token tok_sym2(TokenKind c, int offset) {
   return (Token) { c,  offset, 2 };
 }
 
-bool tok_is_op(Token* t) {
-  return t->kind == TokParenLeft
-    // || t->kind == TokParenRight
-    || t->kind == TokBraceLeft
-    // || t->kind == TokBraceRight
-    || t->kind == TokAdd
-    || t->kind == TokMul
-    || t->kind == TokSub
-    || t->kind == TokDiv
-    || t->kind == TokRem
-    || t->kind == TokExp
-    || t->kind == TokAnd
-    || t->kind == TokOr
-    || t->kind == TokNot
-    || t->kind == TokEq
-    || t->kind == TokNotEq
-    || t->kind == TokGreat
-    || t->kind == TokGreatEq
-    || t->kind == TokLess
-    || t->kind == TokLessEq;
+bool tok_is_op(Token t) {
+  return t.kind == TokParenLeft
+    // || t.kind == TokParenRight
+    || t.kind == TokBraceLeft
+    // || t.kind == TokBraceRight
+    || t.kind == TokAdd
+    || t.kind == TokMul
+    || t.kind == TokSub
+    || t.kind == TokDiv
+    || t.kind == TokRem
+    || t.kind == TokExp
+    || t.kind == TokAnd
+    || t.kind == TokOr
+    || t.kind == TokNot
+    || t.kind == TokEq
+    || t.kind == TokNotEq
+    || t.kind == TokGreat
+    || t.kind == TokGreatEq
+    || t.kind == TokLess
+    || t.kind == TokLessEq;
 }
 
-bool tok_is_expr(Token* t) {
-  return t->kind == TokIdent
-    || t->kind == TokSub
-    || t->kind == TokNot
-    || t->kind == TokInt
-    || t->kind == TokFloat
-    || t->kind == TokTrue
-    || t->kind == TokFalse
-    || t->kind == TokBraceLeft
-    || t->kind == TokParenLeft;
+bool tok_is_expr(Token t) {
+  return t.kind == TokIdent
+    || t.kind == TokSub
+    || t.kind == TokNot
+    || t.kind == TokInt
+    || t.kind == TokFloat
+    || t.kind == TokTrue
+    || t.kind == TokFalse
+    || t.kind == TokBraceLeft
+    || t.kind == TokParenLeft;
 }
 
 void token_dbg(TokenVec tokens, int idx) {
@@ -234,7 +234,7 @@ TokenVec tokenize(char* str) {
         } else if (isalpha(c)) {
           bool is_keyword = false;
           // keywords
-          for (size_t i=0; i<KEYWORDS_LEN; i++) {
+          for (int i=0; i<KEYWORDS_LEN; i++) {
             KeywordData keyword = KEYWORDS[i];
             // len doesn't include null char
             if (strncmp(str, keyword.name, keyword.len) == 0) {
