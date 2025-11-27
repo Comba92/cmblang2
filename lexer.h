@@ -105,8 +105,10 @@ const int KEYWORDS_LEN = sizeof(KEYWORDS) / sizeof(KeywordData);
 
 typedef struct {
   TokenKind kind;
-  int offset;
   int len;
+  int offset;
+  int line;
+  int column;
 } Token;
 VEC_DEF(Token);
 VEC_DEF_NAMED(TokenRefVec, Token*);
@@ -114,18 +116,18 @@ VEC_DEF_NAMED(TokenRefVec, Token*);
 
 void tok_dbg(Token tok, char* src) {
   if (tok.kind < TokErr) {
-    printf("[TOKEN] kind = %-12c\t offset = %-8d\n", tok.kind, tok.offset);
+    printf("[TOKEN] kind = '%c'%-10s\t column = %-8d line = %d\n", tok.kind, "", tok.column, tok.line);
   } else {
-    printf("[TOKEN] kind = %-12s\t offset = %-8d len = %d '%.*s'\n", TOKEN_DBG[tok.kind - TokErr - 1], tok.offset, tok.len, tok.len, src + tok.offset);
+    printf("[TOKEN] kind = %-12s\t column = %-8d line = %d len = %d '%.*s'\n", TOKEN_DBG[tok.kind - TokErr - 1], tok.column, tok.line, tok.len, tok.len, src + tok.offset);
   }
 }
 
-Token tok_sym(char c, int offset) {
-  return (Token) { (TokenKind) c,  offset, 1 };
+Token tok_sym(char c) {
+  return (Token) { (TokenKind) c, 1, 0, 0, 0 };
 }
 
-Token tok_sym2(TokenKind c, int offset) {
-  return (Token) { c,  offset, 2 };
+Token tok_sym2(TokenKind c) {
+  return (Token) { c, 2, 0, 0, 0 };
 }
 
 bool tok_is_op(Token t) {
@@ -160,18 +162,20 @@ bool tok_is_expr(Token t) {
     || t.kind == TokParenLeft;
 }
 
-Token lexer_eat_if_or(char* s, char match, int column, TokenKind tok, TokenKind or) {
-  if (*(s + 1) == match) {
-    return tok_sym2(tok, column);
-  } else {
-    return tok_sym(or, column);
-  }
+bool tok_is_safe(Token t) {
+  return t.kind == TokCurlyLeft
+    || t.kind == TokIf
+    || t.kind == TokWhile
+    || t.kind == TokFn;
 }
 
-typedef struct {
-  TokenVec tokens;
-  
-} Lexer;
+Token lexer_eat_if_or(char* s, char match, TokenKind tok, TokenKind or) {
+  if (*(s + 1) == match) {
+    return tok_sym2(tok);
+  } else {
+    return tok_sym(or);
+  }
+}
 
 TokenVec tokenize(char* str) {
   TokenVec tokens = {0};
@@ -214,21 +218,21 @@ TokenVec tokenize(char* str) {
       case '$':
       case '&':
       case '#':
-        t = tok_sym(c, consumed);
+        t = tok_sym(c);
         break;
 
-      case '/': t = lexer_eat_if_or(str, '/', consumed, Tok2Slash, TokDiv); break;
-      case '.': t = lexer_eat_if_or(str, '.', consumed, Tok2Dot, TokDot); break;
-      case '-': t = lexer_eat_if_or(str, '>', consumed, TokArrow, TokSub); break;
-      case '=': t = lexer_eat_if_or(str, '=', consumed, TokEq, TokAssign); break;
-      case '<': t = lexer_eat_if_or(str, '=', consumed, TokLessEq, TokLess); break;
-      case '>': t = lexer_eat_if_or(str, '=', consumed, TokGreatEq, TokGreat); break;
-      case '!': t = lexer_eat_if_or(str, '=', consumed, TokNotEq, TokBang); break;
+      case '/': t = lexer_eat_if_or(str, '/', Tok2Slash, TokDiv); break;
+      case '.': t = lexer_eat_if_or(str, '.', Tok2Dot, TokDot); break;
+      case '-': t = lexer_eat_if_or(str, '>', TokArrow, TokSub); break;
+      case '=': t = lexer_eat_if_or(str, '=', TokEq, TokAssign); break;
+      case '<': t = lexer_eat_if_or(str, '=', TokLessEq, TokLess); break;
+      case '>': t = lexer_eat_if_or(str, '=', TokGreatEq, TokGreat); break;
+      case '!': t = lexer_eat_if_or(str, '=', TokNotEq, TokBang); break;
       case ':': {
         char next = *(str + 1);
-        if (next == ':') t = tok_sym2(Tok2Colon, consumed);
-        else if (next == '=') t = tok_sym2(TokDecl, consumed);
-        else t = tok_sym(TokColon, consumed);
+        if (next == ':') t = tok_sym2(Tok2Colon);
+        else if (next == '=') t = tok_sym2(TokDecl);
+        else t = tok_sym(TokColon);
       }; break;
 
       case '\0':
@@ -242,9 +246,11 @@ TokenVec tokenize(char* str) {
           if (str[len] == '.') {
             len++;
             while (str[len] != '\0' && isdigit(str[len])) len++;
-            t = (Token) {TokFloatLit, consumed, len};
+            t.kind = TokFloatLit; 
+            t.len = len;
           } else {
-            t = (Token) {TokIntLit, consumed, len};
+            t.kind = TokIntLit;
+            t.len = len;
           }
         } else if (isalpha(c)) {
           bool is_keyword = false;
@@ -253,7 +259,8 @@ TokenVec tokenize(char* str) {
             KeywordData keyword = KEYWORDS[i];
             // len doesn't include null char
             if (strncmp(str, keyword.name, keyword.len) == 0) {
-              t = (Token) {keyword.kind, consumed, keyword.len};
+              t.kind = keyword.kind; 
+              t.len = keyword.len;
               is_keyword = true;
               break;
             }
@@ -264,13 +271,18 @@ TokenVec tokenize(char* str) {
           // not a keyword, must be an ident
           int len = 1;
           while (str[len] != '\0' && (isalnum(str[len]) || str[len] == '_')) len++;
-          t = (Token) {TokIdent, consumed, len};
+          t.kind = TokIdent;
+          t.len = len;
         } else {
-          fprintf(stderr, "[LEX ERR] Invalid token (%c) at col = %d\n", c, column);
-          t = tok_sym(TokErr, consumed);
+          fprintf(stderr, "[LEX ERR] Invalid token (%c) at col = %d line = %d\n", c, column, line);
+          t = tok_sym(TokErr);
         }
       } break;
     }
+
+    t.offset = consumed;
+    t.column = column;
+    t.line = line;
 
     VEC_PUSH(tokens, t);
     str += t.len;

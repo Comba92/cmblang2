@@ -15,7 +15,7 @@ typedef struct {
 
 void typecheck_err(Symtbl* tbl, const char* err) {
   fprintf(stderr, "[TYPE ERR] %s\n", err);
-  tbl->had_errors = true; 
+  tbl->had_errors = true;
 }
 
 SymVec* symtbl_top(Symtbl* tbl) {
@@ -91,6 +91,13 @@ Symtbl symtbl_init(Parser* p) {
   return tbl;
 }
 
+void symtbl_dbg(Symtbl* tbl) {
+  VEC_FOREACH(Sym, *symtbl_top(tbl)) {
+    printf("Name: %s\t", it->name);
+    type_dbg(parser_get_type(tbl->parser, it->type_id));
+  }
+}
+
 bool typecheck_eq(Symtbl* tbl, int ta, int tb) {
   TypeAnn type_a = parser_get_type(tbl->parser, ta);
   TypeAnn type_b = parser_get_type(tbl->parser, tb);
@@ -140,7 +147,7 @@ TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
     } break;
 
     case ExprKindVariable: {
-      int type = symtbl_find(tbl, e.ident);
+      TypeId type = symtbl_find(tbl, e.ident);
 
       if (type == -1) {
         typecheck_err(tbl, fmt("undefined variable '"str_fmt"'", e.ident->len, tbl->parser->src + e.ident->offset));
@@ -270,11 +277,13 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
     switch(s.kind) {
       case StmtKindDecl: {
         StmtDecl decl = s.decl;
-        int type_id = typecheck_expr(tbl, decl.rhs_id);
-        if (!typecheck_eq(tbl, type_id, decl.type_id)) {
+        TypeId expr_type = typecheck_expr(tbl, decl.rhs_id);
+
+        // if it is unknown, we infer it from the right expr
+        if (s.decl.type_id != TypeAnnKindUnknown && !typecheck_eq(tbl, expr_type, decl.type_id)) {
           typecheck_err(tbl, "assignment of different type");
         }
-        symtbl_insert(tbl, type_id, decl.name);
+        symtbl_insert(tbl, expr_type, decl.name);
       } break;
 
       case StmtKindFnDecl: {
@@ -366,5 +375,5 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
 
 bool typecheck(Symtbl* tbl) {
   typecheck_block(tbl, tbl->parser->top_lvl_stmts);
-  return tbl->had_errors;
+  return !tbl->had_errors;
 }
