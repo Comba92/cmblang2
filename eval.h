@@ -451,7 +451,6 @@ void eval_block(Context* ctx, IntVec stmts) {
 
       case StmtKindFnDecl: {
         StmtFnDecl decl = s.func_decl;
-        // TypeAnn signature = parser_get_type(p, decl.signature_id);
         Value v = make_func_value(decl);
         env_insert(env, p->src, decl.name, v);
       } break;

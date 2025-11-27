@@ -1,4 +1,5 @@
 #pragma once
+#include "deps/stb_ds.h"
 
 // TODO: consider storing indexes to Tokens instead of pointers
 
@@ -78,6 +79,7 @@ void expr_dbg(Expr e) {
 }
 
 #define PRIMITIVES_LIST \
+  X(Unknown) \
   X(Int) \
   X(Float) \
   X(Bool) \
@@ -85,7 +87,6 @@ void expr_dbg(Expr e) {
 #define TYPES_LIST \
   X(Array) \
   X(Func) \
-  X(Unknown)
 
 #define X(T) #T,
 const char* TYPE_DBG[] = {
@@ -149,7 +150,7 @@ VEC_DEF(Stmt);
 typedef struct {
   Token* name;
   TypeId type_id;
-  StmtId rhs_id;
+  ExprId rhs_id;
 } StmtDecl;
 
 typedef struct {
@@ -216,17 +217,10 @@ typedef struct  {
   
   // TODO: might be a vector of errors
   const char* err;
+  bool is_panicking;
   bool had_errors;
 } Parser;
 
-void parse_log_err(Parser* p, const char* err) {
-  p->err = err;
-  
-  int token_id = p->curr_token-1;
-  Token* t = &p->tokens.data[token_id];
-  int column = t->offset;
-  fprintf(stderr, "[PARSE ERR] %s at token %d (type = %c), column %d\n", err, token_id, t->kind, column);
-}
 
 TypeAnn parser_get_type(Parser* p, TypeId id) {
   return p->types.data[id];
@@ -330,6 +324,34 @@ Token* parser_eat_if(Parser* p, TokenKind match) {
   else return NULL;
 }
 
+void parser_eat_until_safe(Parser* p) {
+  while (!parser_is_at_end(p)) {
+    if (tok_is_safe(*parser_peek(p))) break;
+    parser_eat(p);
+  }
+
+  p->is_panicking = false;
+}
+
+void parse_log_err(Parser* p, const char* err) {
+  p->had_errors = true;
+  if (p->is_panicking) return;
+
+  p->err = err;
+  
+  int token_id = p->curr_token-1;
+  Token tok = p->tokens.data[token_id];
+  int column = tok.offset;
+  fprintf(stderr, "[PARSE ERR] %s at token %d: ", err, token_id);
+
+  if (tok.kind < TokErr) {
+    printf("kind = '%c' column = %d line = %d\n", tok.kind, tok.column, tok.line);
+  } else {
+    printf("kind = %s offset = %d line = %d len = %d '%.*s'\n", TOKEN_DBG[tok.kind - TokErr - 1], tok.column, tok.line, tok.len, tok.len, p->src + tok.offset);
+  }
+
+  p->is_panicking = true;
+}
 
 void parser_clear(Parser *p) {
   p->tokens.len = 0;
@@ -595,46 +617,6 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
   return lhs;
 }
 
-// OLD: old parse_assign
-// int parse_assign(Parser* p, bool declaration) {
-//   Token* name = parser_eat_match(p, TokIdent, ExpectIdentifier);
-//   if (name == NULL) return -1;
-
-//   if (parser_eat_match(p, TokAssign, ExpectAssign) == NULL) return -1;
-
-//   int rhs = parse_expr(p, 0);
-
-//   Stmt stmt;
-//   if (declaration) {
-//     StmtAssign decl = (StmtAssign) {name, rhs};
-//     stmt = (Stmt) { StmtKindDecl, .decl = decl };
-//   } else {
-//     StmtAssign assign = (StmtAssign) {name, rhs};
-//     stmt = (Stmt) { StmtKindAssign, .assign = assign };
-//   }
-
-//   return parser_push_stmt(p, stmt);
-// }
-
-// OLD: old parse_decl with var ident = expr;
-// int parse_decl(Parser* p) {
-//   // eat var keyword
-//   parser_eat(p);
-//   return parse_assign(p, true);
-// }
-
-
-StmtId parse_decl(Parser* p) {
-  Token* name = parser_eat(p);
-  // eat ':='
-  parser_eat(p);
-  ExprId rhs = parse_expr(p, 0);
-
-  StmtDecl decl = {name, -1, rhs};
-  Stmt stmt = (Stmt) { StmtKindDecl, .decl = decl };
-  return parser_push_stmt(p, stmt);
-}
-
 StmtId parse_type(Parser* p) {
   // primitive
   // function
@@ -710,6 +692,17 @@ StmtId parse_type(Parser* p) {
   }
 
   return parser_push_type(p, t);
+}
+
+StmtId parse_decl(Parser* p) {
+  Token* name = parser_eat(p);
+  // eat ':='
+  parser_eat(p);
+  ExprId rhs = parse_expr(p, 0);
+
+  StmtDecl decl = {name, TypeAnnKindUnknown, rhs};
+  Stmt stmt = (Stmt) { StmtKindDecl, .decl = decl };
+  return parser_push_stmt(p, stmt);
 }
 
 StmtId parse_decl_annot(Parser* p) {
@@ -899,6 +892,9 @@ StmtId parse_func_decl(Parser* p) {
 }
 
 StmtId parse_stmt(Parser* p) {
+  // we are safe
+  if (p->is_panicking) parser_eat_until_safe(p);
+
   int stmt = -1;
   switch(parser_peek(p)->kind) {
     // case TokVar: return parse_decl(p);
@@ -921,22 +917,25 @@ StmtId parse_stmt(Parser* p) {
       else {
         // expression
         int id = parse_expr(p, 0);
+        if (id == -1) printf("FUUUU\n"); 
         stmt = parser_push_stmt(p, (Stmt) {StmtKindExpr, .expr_id = id});
       }
     } break;
   }
 
   // if (parser_eat_match(p, TokSemicolon, "expect ';' at end of statement") == NULL) return -1;
+
   // ignore ';'
-  parser_eat_if(p, TokSemicolon);
+  if (parser_eat_if(p, TokSemicolon) != NULL) p->is_panicking = false;
   return stmt;
 }
 
 Parser parser_init(char* src) {
   Parser p = {0};
   p.src = src;
+
   TypeAnn t;
-  
+
   #define X(Name) t.kind = TypeAnnKind##Name; VEC_PUSH(p.types, t);
   PRIMITIVES_LIST
   #undef X
@@ -947,5 +946,5 @@ Parser parser_init(char* src) {
 bool parse(Parser* p) {
   p->tokens = tokenize(p->src);
   while (!parser_is_at_end(p)) VEC_PUSH(p->top_lvl_stmts, parse_stmt(p));
-  return p->had_errors;
+  return !p->had_errors;
 }

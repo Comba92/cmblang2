@@ -52,13 +52,16 @@ int main() {
   // TokenVec tokens = tokenize(text);
   // VEC_FOREACH(Token, tokens) tok_dbg(*it, text);
 
-  parse(&parser);
-  typecheck(&tbl);
-  eval(&ctx);
+  if (!parse(&parser)) return 2;
+  VEC_FOREACH(Expr, parser.exprs) expr_dbg(*it);
+  VEC_FOREACH(Stmt, parser.stmts) stmt_dbg(*it);
+  VEC_FOREACH(TypeAnn, parser.types) type_dbg(*it);
+  putchar('\n');
 
-  // VEC_FOREACH(Expr, parser.exprs) expr_dbg(*it);
-  // VEC_FOREACH(Stmt, parser.stmts) stmt_dbg(*it);
-  // VEC_FOREACH(TypeAnn, parser.types) type_dbg(*it);
+  if (!typecheck(&tbl)) return 3;
+  symtbl_dbg(&tbl);
+  
+  eval(&ctx);
 
   return 0;
 }
