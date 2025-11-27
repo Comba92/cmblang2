@@ -37,26 +37,28 @@ int main() {
   // DEBUG_LIST
   // #undef X
 
-  #define BUF_SIZE 1024
-  char buf[BUF_SIZE];
+  char* text = file_read_to_string("test.cmb");
+  if (text == NULL) {
+    fprintf(stderr, "Failed to open file\n");
+    return 1;
+  }
 
-  Parser parser = parser_init(&buf);
+  printf("%s\n", text);
+
+  Parser parser = parser_init(text);
   Symtbl tbl = symtbl_init(&parser);
   Context ctx = ctx_init(&parser);
 
-  while(1) {
-    fputs("> ", stdout);
-    stdin_read_line(buf, BUF_SIZE);
+  // TokenVec tokens = tokenize(text);
+  // VEC_FOREACH(Token, tokens) tok_dbg(*it, text);
 
-    parse(&parser);
-    if (parser.err == NULL && typecheck(&tbl)) {
-      eval(&ctx);
-    }
+  parse(&parser);
+  typecheck(&tbl);
+  eval(&ctx);
 
-    // VEC_FOR(parser.tokens) token_dbg(parser.tokens, i);
-    // VEC_FOR(parser.exprs) expr_dbg(parser.exprs, i);
-    // VEC_FOR(parser.stmts) stmt_dbg(parser.stmts, i);
-  }
+  // VEC_FOREACH(Expr, parser.exprs) expr_dbg(*it);
+  // VEC_FOREACH(Stmt, parser.stmts) stmt_dbg(*it);
+  // VEC_FOREACH(TypeAnn, parser.types) type_dbg(*it);
 
   return 0;
 }

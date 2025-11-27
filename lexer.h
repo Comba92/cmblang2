@@ -2,8 +2,44 @@
 
 // TODO: if Token type stays small, consider passing always by copy instead of pointer
 
+#define TOKENS_LIST \
+  X(TokAnd) \
+  X(TokOr) \
+  X(TokNot) \
+  X(TokEq) \
+  X(TokNotEq) \
+  X(TokGreatEq) \
+  X(TokLessEq) \
+  X(TokArrow) \
+  X(Tok2Colon) \
+  X(TokDecl) \
+  X(Tok2Dot) \
+  X(Tok2Slash) \
+  X(TokIntLit) \
+  X(TokFloatLit) \
+  X(TokInt) \
+  X(TokFloat) \
+  X(TokBool) \
+  X(TokIdent) \
+  X(TokTrue) \
+  X(TokFalse) \
+  X(TokIf) \
+  X(TokElse) \
+  X(TokWhile) \
+  X(TokFor) \
+  X(TokFn) \
+  X(TokReturn) \
+  X(TokStruct) \
+  X(TokAs) \
+
+#define X(Tok) #Tok,
+const char* TOKEN_DBG[] = {
+  TOKENS_LIST
+};
+#undef X
+
+#define X(Tok) Tok,
 typedef enum {
-  TokErr = 0,
   TokParenLeft = '(',
   TokParenRight = ')',
   TokBraceLeft = '[',
@@ -31,37 +67,10 @@ typedef enum {
   TokSand = '&',
   TokHash = '#',
   
-  TokAnd = 128,
-  TokOr,
-  TokNot,
-  
-  TokEq,
-  TokNotEq,
-  TokGreatEq,
-  TokLessEq,
-  TokArrow,
-  Tok2Colon,
-  TokDecl,
-  Tok2Dot,
-  Tok2Slash,
-  
-  TokInt,
-  TokFloat,
-  TokBool,
-  TokIdent,
-
-  // TokVar,
-  TokTrue,
-  TokFalse,
-  TokIf,
-  TokElse,
-  TokWhile,
-  TokFor,
-  TokFn,
-  TokReturn,
-  TokStruct,
-  TokAs,
+  TokErr = 128,
+  TOKENS_LIST
 } TokenKind;
+#undef X
 
 typedef struct {
   const char* name;
@@ -100,8 +109,16 @@ typedef struct {
   int len;
 } Token;
 VEC_DEF(Token);
+VEC_DEF_NAMED(TokenRefVec, Token*);
 
-static Token TOKEN_ERR = { TokErr, -1, -1 };
+
+void tok_dbg(Token tok, char* src) {
+  if (tok.kind < TokErr) {
+    printf("[TOKEN] kind = %-12c\t offset = %-8d\n", tok.kind, tok.offset);
+  } else {
+    printf("[TOKEN] kind = %-12s\t offset = %-8d len = %d '%.*s'\n", TOKEN_DBG[tok.kind - TokErr - 1], tok.offset, tok.len, tok.len, src + tok.offset);
+  }
+}
 
 Token tok_sym(char c, int offset) {
   return (Token) { (TokenKind) c,  offset, 1 };
@@ -113,9 +130,7 @@ Token tok_sym2(TokenKind c, int offset) {
 
 bool tok_is_op(Token t) {
   return t.kind == TokParenLeft
-    // || t.kind == TokParenRight
     || t.kind == TokBraceLeft
-    // || t.kind == TokBraceRight
     || t.kind == TokAdd
     || t.kind == TokMul
     || t.kind == TokSub
@@ -137,17 +152,12 @@ bool tok_is_expr(Token t) {
   return t.kind == TokIdent
     || t.kind == TokSub
     || t.kind == TokNot
-    || t.kind == TokInt
-    || t.kind == TokFloat
+    || t.kind == TokIntLit
+    || t.kind == TokFloatLit
     || t.kind == TokTrue
     || t.kind == TokFalse
     || t.kind == TokBraceLeft
     || t.kind == TokParenLeft;
-}
-
-void token_dbg(TokenVec tokens, int idx) {
-  Token* t = &tokens.data[idx];
-  printf("[TOKEN %d] kind = %c, col = %d, len = %d\n", idx, t->kind, t->offset, t->len);
 }
 
 Token lexer_eat_if_or(char* s, char match, int column, TokenKind tok, TokenKind or) {
@@ -158,9 +168,14 @@ Token lexer_eat_if_or(char* s, char match, int column, TokenKind tok, TokenKind 
   }
 }
 
+typedef struct {
+  TokenVec tokens;
+  
+} Lexer;
+
 TokenVec tokenize(char* str) {
   TokenVec tokens = {0};
-  // TODO: consider removing this
+
   int consumed = 0;
   int column = 0;
   int line = 0;
@@ -199,21 +214,21 @@ TokenVec tokenize(char* str) {
       case '$':
       case '&':
       case '#':
-        t = tok_sym(c, column);
+        t = tok_sym(c, consumed);
         break;
 
-      case '/': t = lexer_eat_if_or(str, '/', column, Tok2Slash, TokDiv); break;
-      case '.': t = lexer_eat_if_or(str, '.', column, Tok2Dot, TokDot); break;
-      case '-': t = lexer_eat_if_or(str, '>', column, TokArrow, TokSub); break;
-      case '=': t = lexer_eat_if_or(str, '=', column, TokEq, TokAssign); break;
-      case '<': t = lexer_eat_if_or(str, '=', column, TokLessEq, TokLess); break;
-      case '>': t = lexer_eat_if_or(str, '=', column, TokGreatEq, TokGreat); break;
-      case '!': t = lexer_eat_if_or(str, '=', column, TokNotEq, TokBang); break;
+      case '/': t = lexer_eat_if_or(str, '/', consumed, Tok2Slash, TokDiv); break;
+      case '.': t = lexer_eat_if_or(str, '.', consumed, Tok2Dot, TokDot); break;
+      case '-': t = lexer_eat_if_or(str, '>', consumed, TokArrow, TokSub); break;
+      case '=': t = lexer_eat_if_or(str, '=', consumed, TokEq, TokAssign); break;
+      case '<': t = lexer_eat_if_or(str, '=', consumed, TokLessEq, TokLess); break;
+      case '>': t = lexer_eat_if_or(str, '=', consumed, TokGreatEq, TokGreat); break;
+      case '!': t = lexer_eat_if_or(str, '=', consumed, TokNotEq, TokBang); break;
       case ':': {
         char next = *(str + 1);
-        if (next == ':') t = tok_sym2(Tok2Colon, column);
-        else if (next == '=') t = tok_sym2(TokDecl, column);
-        else t = tok_sym(TokColon, column);
+        if (next == ':') t = tok_sym2(Tok2Colon, consumed);
+        else if (next == '=') t = tok_sym2(TokDecl, consumed);
+        else t = tok_sym(TokColon, consumed);
       }; break;
 
       case '\0':
@@ -227,9 +242,9 @@ TokenVec tokenize(char* str) {
           if (str[len] == '.') {
             len++;
             while (str[len] != '\0' && isdigit(str[len])) len++;
-            t = (Token) {TokFloat, column, len};
+            t = (Token) {TokFloatLit, consumed, len};
           } else {
-            t = (Token) {TokInt, column, len};
+            t = (Token) {TokIntLit, consumed, len};
           }
         } else if (isalpha(c)) {
           bool is_keyword = false;
@@ -238,7 +253,7 @@ TokenVec tokenize(char* str) {
             KeywordData keyword = KEYWORDS[i];
             // len doesn't include null char
             if (strncmp(str, keyword.name, keyword.len) == 0) {
-              t = (Token) {keyword.kind, column, keyword.len};
+              t = (Token) {keyword.kind, consumed, keyword.len};
               is_keyword = true;
               break;
             }
@@ -249,11 +264,10 @@ TokenVec tokenize(char* str) {
           // not a keyword, must be an ident
           int len = 1;
           while (str[len] != '\0' && (isalnum(str[len]) || str[len] == '_')) len++;
-          t = (Token) {TokIdent, column, len};
+          t = (Token) {TokIdent, consumed, len};
         } else {
-          // TODO: handle error
           fprintf(stderr, "[LEX ERR] Invalid token (%c) at col = %d\n", c, column);
-          return (TokenVec) {0};
+          t = tok_sym(TokErr, consumed);
         }
       } break;
     }
