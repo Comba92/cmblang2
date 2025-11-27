@@ -97,7 +97,8 @@ bool typecheck_eq(Symtbl* tbl, int ta, int tb) {
   return type_eq(tbl->parser, type_a, type_b);
 }
 
-ExprId typecheck_expr(Symtbl* tbl, int expr_id) {
+// TODO: should return TypeAnn?
+TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
   Expr e = parser_get_expr(tbl->parser, expr_id);
 
   switch (e.kind) {
@@ -213,6 +214,55 @@ ExprId typecheck_expr(Symtbl* tbl, int expr_id) {
   return -1;
 }
 
+bool typecheck_returns(Symtbl* tbl, IntVec stmts, TypeId target_type);
+bool block_has_valid_return(Symtbl* tbl, IntVec stmts, TypeId target_type) {
+  // get last stmt and check it is a return
+  StmtId last_id = VEC_LAST(stmts);
+  Stmt last = parser_get_stmt(tbl->parser, last_id);
+  if (last.kind != StmtKindReturn) return false;
+
+  TypeId expr_type = typecheck_expr(tbl, last.ret.expr_id);
+  typecheck_eq(tbl, expr_type, target_type);
+
+  return typecheck_returns(tbl, stmts, target_type);
+}
+
+bool typecheck_returns(Symtbl* tbl, IntVec stmts, TypeId target_type) {
+  if (stmts.len == 0) return false;
+
+  VEC_FOR(stmts) {
+    // get current stmt
+    int id = stmts.data[i];
+    Stmt s = parser_get_stmt(tbl->parser, id);
+
+    // check if it is a block
+    switch (s.kind) {
+      case StmtKindIfElse: {
+        StmtIfElse if_else = s.if_else;
+        Stmt if_block = parser_get_stmt(tbl->parser, if_else.if_id);
+        Stmt else_block = parser_get_stmt(tbl->parser, if_else.else_id);
+
+        return block_has_valid_return(tbl, if_block.block.stmt_ids, target_type)
+          || block_has_valid_return(tbl, else_block.block.stmt_ids, target_type);
+      } break;
+
+      case StmtKindWhile: {
+        StmtId block_id = s.wloop.block_id;
+        Stmt block = parser_get_stmt(tbl->parser, block_id);
+
+        return block_has_valid_return(tbl, block.block.stmt_ids, target_type);
+      } break;
+      case StmtKindBlock: {
+        return block_has_valid_return(tbl, s.block.stmt_ids, target_type);
+      } break;
+
+      default: return false;
+    }
+  }
+
+  return true;
+}
+
 void typecheck_block(Symtbl* tbl, IntVec stmts) {
   VEC_FOREACH(int, stmts) {
     Stmt s = parser_get_stmt(tbl->parser, *it);
@@ -223,16 +273,22 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
         int type_id = typecheck_expr(tbl, decl.rhs_id);
         if (!typecheck_eq(tbl, type_id, decl.type_id)) {
           typecheck_err(tbl, "assignment of different type");
-          return;
         }
         symtbl_insert(tbl, type_id, decl.name);
       } break;
 
       case StmtKindFnDecl: {
         StmtFnDecl decl = s.func_decl;
-        symtbl_insert(tbl, decl.signature_id, decl.name);
+
+        StmtBlock block = parser_get_stmt(tbl->parser, decl.block_id).block;
         TypeAnn type = parser_get_type(tbl->parser, decl.signature_id);
         TypeAnnFunc signature = type.func;
+
+        if (!typecheck_returns(tbl, block.stmt_ids, signature.ret_id)) {
+          typecheck_err(tbl, "not all function blocks ends with a return statment, or not all return statements are of the same type");
+        }
+
+        symtbl_insert(tbl, decl.signature_id, decl.name);
 
         symtbl_push_scope(tbl);
         // push args to scope
@@ -242,8 +298,7 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
           symtbl_insert(tbl, type_id, name);
         }
 
-        Stmt block = parser_get_stmt(tbl->parser, decl.block_id);
-        typecheck_block(tbl, block.block.stmt_ids);
+        typecheck_block(tbl, block.stmt_ids);
         symtbl_pop_scope(tbl);
       } break;
 
@@ -256,7 +311,6 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
           int expr_type = typecheck_expr(tbl, assign.rhs_id);
           if (!typecheck_eq(tbl, var_type, expr_type)) {
             typecheck_err(tbl, "assignment of different type");
-            return;
           }
         }
       } break;
@@ -272,7 +326,6 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
         int cond_id = typecheck_expr(tbl, if_else.cond_id);
         if (parser_get_type(tbl->parser, cond_id).kind != TypeAnnKindBool) {
           typecheck_err(tbl, "if condition isn't bool");
-          return;
         }
 
         symtbl_push_scope(tbl);
@@ -291,7 +344,6 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
         int cond_type = typecheck_expr(tbl, wloop.cond_id);
         if (parser_get_type(tbl->parser, cond_type).kind != TypeAnnKindBool) {
           typecheck_err(tbl, "while condition isn't bool");
-          return;
         }
 
         symtbl_push_scope(tbl);
@@ -301,11 +353,12 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
       } break;
 
       case StmtKindExpr: {
-        int expr_type = typecheck_expr(tbl, s.expr_id);
+        // int expr_type = typecheck_expr(tbl, s.expr_id);
       } break;
 
       case StmtKindReturn: {
-        int expr_type = typecheck_expr(tbl, s.expr_id);
+        // returns are checked in functions declarations
+        // int expr_type = typecheck_expr(tbl, s.expr_id);
       } break;
     }
   }

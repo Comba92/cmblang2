@@ -78,6 +78,7 @@ void expr_dbg(Expr e) {
 }
 
 #define PRIMITIVES_LIST \
+  X(Void) \
   X(Int) \
   X(Float) \
   X(Bool) \
@@ -194,6 +195,7 @@ struct Stmt {
     StmtBlock block;
     StmtIfElse if_else;
     StmtWhile wloop;
+    StmtReturn ret;
     ExprId expr_id;
   };
 };
@@ -805,25 +807,6 @@ StmtId parse_return(Parser* p) {
   return parser_push_stmt(p, stmt);
 }
 
-bool check_return_stmts(Parser* p, IntVec stmts) {
-  if (stmts.len == 0) return false;
-
-  // TODO
-  bool valid = true;
-  VEC_FOR(stmts) {
-    int id = stmts.data[i];
-    Stmt s = parser_get_stmt(p, id);
-
-    switch (s.kind) {
-      case StmtKindBlock: break;
-      case StmtKindIfElse: break;
-      case StmtKindWhile: break;
-    }
-  }
-
-  return false;
-}
-
 StmtId parse_func_decl(Parser* p) {
   // eat 'fn'
   parser_eat(p);
@@ -863,7 +846,7 @@ StmtId parse_func_decl(Parser* p) {
     }
   }
 
-  TypeId ret_id = -1;
+  TypeId ret_id = TypeAnnKindVoid;
   Token* arrow = parser_eat_if(p, TokArrow);
   if (arrow != NULL) {
     ret_id = parse_type(p);
@@ -871,20 +854,6 @@ StmtId parse_func_decl(Parser* p) {
   }
 
   StmtId block_id = parse_block(p);
-
-  // TODO: look for return statements at end of each block recursively
-  
-  // TODO: this sucks and won't work
-  // IntVec ids = parser_get_stmt(p, block_id)->block.stmt_ids;
-  // int last_stmt = ids.len > 0 ? ids.data[ids.len-1] : -1;
-
-  // // if we don't have a return type, we don't care
-  // // if we have a return value and block is empty, it is an error
-  // // if we have some stmts but no return value, it is an error
-  // if (ret_id != -1 && (last_stmt == -1 || parser_get_stmt(p, last_stmt)->kind != StmtKindReturn)) {
-  //   parse_log_err(p, "expect return expression at end of function implementation");
-  //   goto error;
-  // }
 
   // build type
   TypeAnnFunc type = {params, ret_id};

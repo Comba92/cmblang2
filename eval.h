@@ -512,6 +512,10 @@ void eval_block(Context* ctx, IntVec stmts) {
         }
         break;
       }
+
+      case StmtKindReturn: {
+        
+      } break;
     }
   }
 }
