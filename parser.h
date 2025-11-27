@@ -2,24 +2,34 @@
 
 // TODO: consider storing indexes to Tokens instead of pointers
 
-// TODO: use these instead of int
 typedef int ExprId;
 typedef int StmtId;
 typedef int TypeId;
 
+#define EXPR_LIST \
+  X(ExprKindLiteral) \
+  X(ExprKindVariable) \
+  X(ExprKindUnary) \
+  X(ExprKindBinary) \
+  X(ExprKindCall) \
+
+#define X(E) #E,
+const char* EXPR_DBG[] = {
+  EXPR_LIST
+};
+#undef X
+
+#define X(E) E,
 typedef enum {
-  ExprKindLiteral,
-  ExprKindVariable,
-  ExprKindUnary,
-  ExprKindBinary,
-  ExprKindCall,
+  EXPR_LIST
 } ExprKind;
+#undef X
 
 typedef enum {
-  LiteralKindInt   = TokInt,
-  LiteralKindFloat = TokFloat,
-  LiteralKindTrue  = TokTrue,
-  LiteralKindFalse = TokFalse,
+  LiteralKindInt,
+  LiteralKindFloat,
+  LiteralKindTrue,
+  LiteralKindFalse,
   LiteralKindArray,
 } LiteralKind;
 
@@ -61,32 +71,39 @@ typedef struct {
     ExprCall call;
   };
 } Expr;
+VEC_DEF(Expr);
+
+void expr_dbg(Expr e) {
+  printf("[EXPR] kind = %s\n", EXPR_DBG[e.kind]);
+}
 
 #define PRIMITIVES_LIST \
   X(Int) \
   X(Float) \
   X(Bool) \
 
+#define TYPES_LIST \
+  X(Array) \
+  X(Func) \
+  X(Unknown)
+
+#define X(T) #T,
+const char* TYPE_DBG[] = {
+  PRIMITIVES_LIST
+  TYPES_LIST
+};
+#undef X
+
 #define X(Name) TypeAnnKind##Name,
 typedef enum {
   PRIMITIVES_LIST
-  TypeAnnKindArray,
-  TypeAnnKindFunc,
-  TypeAnnKindUnknown,
+  TYPES_LIST
 } TypeAnnKind;
 #undef X
 
 typedef struct {
-  // TODO: these are owned and should be freed
-  char* name;
-  TypeId type_id;
-} FnParam;
-VEC_DEF(FnParam);
-
-typedef struct {
-  FnParamVec params;
+  IntVec params_ids;
   TypeId ret_id;
-  StmtId block_id;
 } TypeAnnFunc;
 
 typedef struct {
@@ -99,16 +116,31 @@ typedef struct {
 } TypeAnn;
 VEC_DEF(TypeAnn);
 
+void type_dbg(TypeAnn t) {
+  printf("[TYPE] kind = %s\n", TYPE_DBG[t.kind]);
+}
+
+#define STMT_LIST \
+  X(StmtKindExpr) \
+  X(StmtKindDecl) \
+  X(StmtKindFnDecl) \
+  X(StmtKindAssign) \
+  X(StmtKindBlock) \
+  X(StmtKindIfElse) \
+  X(StmtKindWhile) \
+  X(StmtKindReturn) \
+
+#define X(S) #S,
+const char* STMT_DEBUG[] = {
+  STMT_LIST
+};
+#undef X
+
+#define X(S) S,
 typedef enum {
-  StmtKindExpr,
-  StmtKindDecl,
-  StmtKindFnDecl,
-  StmtKindAssign,
-  StmtKindBlock,
-  StmtKindIfElse,
-  StmtKindWhile,
-  StmtKindReturn,
+  STMT_LIST
 } StmtKind;
+#undef X
 
 // forward declare Stmt and StmtVec, so we can build self referencing stmts such as StmtBlock
 typedef struct Stmt Stmt;
@@ -122,7 +154,10 @@ typedef struct {
 
 typedef struct {
   Token* name;
-  TypeId type_id;
+  TokenRefVec params_names;
+  TypeId signature_id;
+  // TODO: probably should own the StmtBlock
+  StmtId block_id;
 } StmtFnDecl;
 
 typedef struct {
@@ -163,28 +198,8 @@ struct Stmt {
   };
 };
 
-VEC_DEF(Expr);
-
-void expr_dbg(ExprVec exprs, int id) {
-  Expr* e = &exprs.data[id];
-  printf("[EXPR %d] kind = %d ", id, e->kind);
-
-  switch(e->kind) {
-    case ExprKindLiteral: printf("literal\n"); break;
-    case ExprKindVariable: printf("variable\n"); break;
-    case ExprKindUnary:
-      printf("op = %c, rhs = %d\n", e->un.op->kind, e->un.expr);
-      break;
-    case ExprKindBinary: 
-      printf("lhs = %d, op = %c, rhs = %d\n", e->bin.lhs_id, e->bin.op->kind, e->bin.rhs_id);
-      break;
-    default: break; 
-  }
-}
-
-void stmt_dbg(StmtVec stmts, int id) {
-  Stmt* s = &stmts.data[id];
-  printf("[STMT %d] kind = %d\n", id, s->kind);
+void stmt_dbg(Stmt s) {
+  printf("[STMT] kind = %s\n", STMT_DEBUG[s.kind]);
 }
 
 typedef struct  {
@@ -201,6 +216,7 @@ typedef struct  {
   
   // TODO: might be a vector of errors
   const char* err;
+  bool had_errors;
 } Parser;
 
 void parse_log_err(Parser* p, const char* err) {
@@ -212,12 +228,66 @@ void parse_log_err(Parser* p, const char* err) {
   fprintf(stderr, "[PARSE ERR] %s at token %d (type = %c), column %d\n", err, token_id, t->kind, column);
 }
 
+TypeAnn parser_get_type(Parser* p, TypeId id) {
+  return p->types.data[id];
+}
+
+Expr parser_get_expr(Parser* p, ExprId id) {
+  return p->exprs.data[id];
+}
+
+Stmt parser_get_stmt(Parser* p, StmtId id) {
+  return p->stmts.data[id];
+}
+
+
 ExprId parser_push_expr(Parser* p, Expr e) {
   VEC_PUSH(p->exprs, e);
   return p->exprs.len-1;
 }
 
+bool type_eq(Parser* p, TypeAnn a, TypeAnn b) {
+  if (a.kind != b.kind) return false;
+
+  switch(a.kind) {
+    case TypeAnnKindInt:
+    case TypeAnnKindFloat:
+    case TypeAnnKindBool:
+      return true;
+
+    case TypeAnnKindFunc: {
+      TypeAnnFunc func_a = a.func;
+      TypeAnnFunc func_b = b.func;
+
+      IntVec params_a = func_a.params_ids;
+      IntVec params_b = func_b.params_ids;
+      if (params_a.len != params_b.len) return false;
+      for(int i=0; i<params_a.len; i++) {
+        TypeAnn param_a = parser_get_type(p, params_a.data[i]);
+        TypeAnn param_b = parser_get_type(p, params_b.data[i]);
+        if (!type_eq(p, param_a, param_b))
+          return false;
+      }
+
+      return func_a.ret_id == func_b.ret_id;
+    } break;
+
+    case TypeAnnKindArray: {
+      TypeAnn inner_a = parser_get_type(p, a.inner_id);
+      TypeAnn inner_b = parser_get_type(p, b.inner_id);
+      return type_eq(p, inner_a, inner_b);
+    } break;
+  }
+
+  return false;
+}
+
 TypeId parser_push_type(Parser* p, TypeAnn t) {
+  VEC_FOR(p->types) {
+    TypeAnn it = p->types.data[i];
+    if (type_eq(p, it, t)) return i;
+  }
+  
   VEC_PUSH(p->types, t);
   return p->types.len-1;
 }
@@ -235,9 +305,10 @@ Token* parser_peek(Parser* p) {
   return &p->tokens.data[p->curr_token];
 }
 
+Token TOK_ERR = { TokErr, -1, 1 };
 Token* parser_peek_nth(Parser* p, int n) {
   int idx = n + p->curr_token;
-  return idx < p->tokens.len ? &p->tokens.data[idx] : &TOKEN_ERR;
+  return idx < p->tokens.len ? &p->tokens.data[idx] : &TOK_ERR;
 }
 
 Token* parser_eat(Parser* p) {
@@ -259,32 +330,19 @@ Token* parser_eat_if(Parser* p, TokenKind match) {
   else return NULL;
 }
 
-// return by value
-TypeAnn* parser_get_type(Parser* p, TypeId id) {
-  return &p->types.data[id];
-}
-
-// return by value
-Expr* parser_get_expr(Parser* p, ExprId id) {
-  return &p->exprs.data[id];
-}
-
-// return by value
-Stmt* parser_get_stmt(Parser* p, StmtId id) {
-  return &p->stmts.data[id];
-}
 
 void parser_clear(Parser *p) {
   p->tokens.len = 0;
   p->curr_token = 0;
+
+  // tokens will be overwritten next call to parse, so free them here
   VEC_FREE(p->tokens);
 
-  // do not free types
-  // VEC_FOR(p->types) {
-  //   TypeAnn* t = &p->types.data[i];
-  //   if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params);
-  // }
-  // p->types.len = 0;
+  VEC_FOR(p->types) {
+    TypeAnn* t = &p->types.data[i];
+    if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params_ids);
+  }
+  p->types.len = 0;
 
   VEC_FOR(p->exprs) {
     Expr* e = &p->exprs.data[i];
@@ -298,7 +356,8 @@ void parser_clear(Parser *p) {
 
   VEC_FOR(p->stmts) {
     Stmt* s = &p->stmts.data[i];
-    if (s->kind == StmtKindBlock) VEC_FREE(s->block.stmt_ids);
+    if (s->kind == StmtKindBlock)  VEC_FREE(s->block.stmt_ids);
+    if (s->kind == StmtKindFnDecl) VEC_FREE(s->func_decl.params_names);
   }
   p->stmts.len = 0;
   p->top_lvl_stmts.len = 0;
@@ -309,13 +368,7 @@ void parser_clear(Parser *p) {
 void parser_free(Parser *p) {
   parser_clear(p);
   VEC_FREE(p->tokens);
-
-  VEC_FOR(p->types) {
-    TypeAnn* t = &p->types.data[i];
-    if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params);
-  }
-  p->types.len = 0;
-  
+  VEC_FREE(p->types);  
   VEC_FREE(p->types);
   VEC_FREE(p->exprs);
   VEC_FREE(p->stmts);
@@ -374,7 +427,17 @@ PrecLvl infix_lvl(Token op) {
 }
 
 Expr literal_primitive(Token* t) {
-  ExprLiteral lit = {(LiteralKind) t->kind, .tok = t};
+  LiteralKind kind;
+  switch (t->kind) {
+    case TokTrue:     kind = LiteralKindTrue; break;
+    case TokFalse:    kind = LiteralKindFalse; break;
+    case TokIntLit:   kind = LiteralKindInt; break;
+    case TokFloatLit: kind = LiteralKindFloat; break;
+    // unreachable?
+    default: return (Expr) {0};
+  }
+
+  ExprLiteral lit = {kind, .tok = t};
   return (Expr) { ExprKindLiteral, .lit = lit };
 }
 
@@ -388,17 +451,17 @@ Expr variable(Token* t) {
   return (Expr) { ExprKindVariable, .ident = t };
 }
 
-Expr unary(Token* op, int rhs) {
+Expr unary(Token* op, ExprId rhs) {
   ExprUnary un = {op, rhs};
   return (Expr) { ExprKindUnary, .un = un };
 }
 
-Expr binary(int lhs, Token* op, int rhs) {
+Expr binary(ExprId lhs, Token* op, ExprId rhs) {
   ExprBinary bin = {lhs, op, rhs};
   return (Expr) { ExprKindBinary, .bin = bin };
 }
 
-Expr call(int lhs, IntVec args) {
+Expr call(ExprId lhs, IntVec args) {
   ExprCall call = {lhs, args};
   return (Expr) { ExprKindCall, .call = call };
 }
@@ -410,7 +473,7 @@ IntVec collect_expr_list(Parser* p, TokenKind separator, TokenKind terminator, c
   IntVec expr_ids = {0};
   
   while (!parser_is_at_end(p)) {
-    int val = parse_expr(p, 0);
+    ExprId val = parse_expr(p, 0);
     VEC_PUSH(expr_ids, val);
 
     Token* t = parser_peek(p);
@@ -440,10 +503,10 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
   Token* t = parser_eat(p);
 
   // parse lhs
-  int lhs = -1;
+  ExprId lhs = -1;
   switch (t->kind) {
-    case TokInt:
-    case TokFloat:
+    case TokIntLit:
+    case TokFloatLit:
     case TokTrue:
     case TokFalse:
       lhs = parser_push_expr(p, literal_primitive(t));
@@ -490,12 +553,13 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
 
     int postfix = postfix_lvl(*op);
     if (postfix != -1) {
+      // unary postfix op
       if (postfix < prec_lvl) break;
       parser_eat(p);
 
       if (op->kind == TokBraceLeft) {
         // array indexing
-        int rhs = parse_expr(p, 0);
+        ExprId rhs = parse_expr(p, 0);
         if (parser_eat_match(p, TokBraceRight, "unclosed brace '[' for array indexing expression") == NULL) return -1;
         
         lhs = parser_push_expr(p, binary(lhs, op, rhs));
@@ -506,22 +570,25 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
           // no args
           lhs = parser_push_expr(p, call(lhs, (IntVec) {0}));
         } else {
+          // collect args
           IntVec args = collect_expr_list(p, TokComma, TokParenRight, "expect ',' or parenthesis closing ')' for function call arguments");
           if (args.len == 0) return -1;
           lhs = parser_push_expr(p, call(lhs, args));
         }
       } else {
+        // any other postfix op
         lhs = parser_push_expr(p, unary(op, lhs));
       }
 
       continue;
     }
 
+    // binary infix op
     PrecLvl infix = infix_lvl(*op);
     if (infix.left < prec_lvl) break;
     parser_eat(p);
 
-    int rhs = parse_expr(p, infix.right);
+    ExprId rhs = parse_expr(p, infix.right);
     lhs = parser_push_expr(p, binary(lhs, op, rhs));
   }
 
@@ -561,7 +628,7 @@ StmtId parse_decl(Parser* p) {
   Token* name = parser_eat(p);
   // eat ':='
   parser_eat(p);
-  int rhs = parse_expr(p, 0);
+  ExprId rhs = parse_expr(p, 0);
 
   StmtDecl decl = {name, -1, rhs};
   Stmt stmt = (Stmt) { StmtKindDecl, .decl = decl };
@@ -578,9 +645,9 @@ StmtId parse_type(Parser* p) {
 
   TypeAnn t;
   switch (tok->kind) {
-    case TokInt: t.kind = TypeAnnKindInt; break;
-    case TokFloat: t.kind = TypeAnnKindFloat; break;
-    case TokBool: t.kind = TypeAnnKindBool; break;
+    case TokInt:   t.kind  = TypeAnnKindInt; break;
+    case TokFloat: t.kind  = TypeAnnKindFloat; break;
+    case TokBool:  t.kind  = TypeAnnKindBool; break;
 
     case TokIdent: {
       // this might be any kind of user defined type
@@ -593,7 +660,7 @@ StmtId parse_type(Parser* p) {
       // array
 
       // parse inner type
-      int inner = parse_type(p);
+      TypeId inner = parse_type(p);
       if (parser_eat_match(p, TokBraceRight, "expect closing brace ']' in array type annotation") == NULL) return -1;
 
       t = (TypeAnn) { TypeAnnKindArray, .inner_id = inner };
@@ -603,12 +670,11 @@ StmtId parse_type(Parser* p) {
       // function
 
       // careful: memory leak if return early  
-      FnParamVec params = {0};
+      IntVec params = {0};
       
       while (!parser_is_at_end(p)) {
-        int param_id = parse_type(p);
-        FnParam param = {NULL, param_id};
-        VEC_PUSH(params, param);
+        TypeId param_id = parse_type(p);
+        VEC_PUSH(params, param_id);
 
         Token* t = parser_peek(p);
         if (t->kind == TokParenRight) break;
@@ -628,13 +694,13 @@ StmtId parse_type(Parser* p) {
         return -1;
       }
 
-      // TODO: function annotation might always require an arrow 
-      int ret_id = -1;
+      // TODO: function annotation might always require an arrow (and void if no return type)
+      TypeId ret_id = -1;
       if (parser_eat_if(p, TokArrow) != NULL) {
         ret_id = parse_type(p);
       }
 
-      TypeAnnFunc func = { params, ret_id, -1 };
+      TypeAnnFunc func = { params, ret_id };
       t = (TypeAnn) { TypeAnnKindFunc, .func = func };
     } break;
 
@@ -651,10 +717,10 @@ StmtId parse_decl_annot(Parser* p) {
 
   // eat ':'
   parser_eat(p);
-  int type = parse_type(p);
+  TypeId type = parse_type(p);
 
   if (parser_eat_match(p, TokAssign, "expect '=' after variable name and type annotation") == NULL) return -1;
-  int rhs = parse_expr(p, 0);
+  ExprId rhs = parse_expr(p, 0);
 
   StmtDecl decl = (StmtDecl) {name, type, rhs};
   Stmt stmt = (Stmt) { StmtKindDecl, .decl = decl };
@@ -665,7 +731,7 @@ StmtId parse_assign(Parser* p) {
   Token* name = parser_eat(p);
   // eat '='
   parser_eat(p);
-  int rhs = parse_expr(p, 0);
+  ExprId rhs = parse_expr(p, 0);
 
   StmtAssign assign = (StmtAssign) {name, rhs};
   Stmt stmt = (Stmt) { StmtKindAssign, .assign = assign };
@@ -680,7 +746,7 @@ StmtId parse_block(Parser* p) {
   // careful: memory leak if return early
   IntVec stmt_ids = {0};
   while (!parser_is_at_end(p) && parser_peek(p)->kind != TokCurlyRight) {
-    int s = parse_stmt(p);
+    StmtId s = parse_stmt(p);
     VEC_PUSH(stmt_ids, s);
   }
   
@@ -699,10 +765,10 @@ StmtId parse_block(Parser* p) {
 StmtId parse_if_else(Parser* p) {
   // eat 'if'
   parser_eat(p);
-  int expr_id = parse_expr(p, 0);
-  int if_id = parse_block(p);
+  ExprId expr_id = parse_expr(p, 0);
+  StmtId if_id = parse_block(p);
 
-  int else_id = -1;
+  StmtId else_id = -1;
   if (parser_peek(p)->kind == TokElse) {
     // eat 'else'
     parser_eat(p);
@@ -716,8 +782,8 @@ StmtId parse_if_else(Parser* p) {
 StmtId parse_while(Parser* p) {
   // eat 'while'
   parser_eat(p);
-  int expr_id = parse_expr(p, 0);
-  int while_id = parse_block(p);
+  ExprId expr_id = parse_expr(p, 0);
+  StmtId while_id = parse_block(p);
 
   StmtWhile stmt = { .cond_id = expr_id, .block_id = while_id };
   return parser_push_stmt(p, (Stmt) {StmtKindWhile, .wloop = stmt});
@@ -729,7 +795,7 @@ StmtId parse_return(Parser* p) {
 
   Stmt stmt;
   if (tok_is_expr(*parser_peek(p))) {
-    int expr = parse_expr(p, 0);
+    ExprId expr = parse_expr(p, 0);
     stmt = (Stmt) { StmtKindReturn, .expr_id = expr };
   } else {
     // no expr
@@ -742,12 +808,13 @@ StmtId parse_return(Parser* p) {
 bool check_return_stmts(Parser* p, IntVec stmts) {
   if (stmts.len == 0) return false;
 
+  // TODO
   bool valid = true;
   VEC_FOR(stmts) {
     int id = stmts.data[i];
-    Stmt* s = parser_get_stmt(p, id);
+    Stmt s = parser_get_stmt(p, id);
 
-    switch (s->kind) {
+    switch (s.kind) {
       case StmtKindBlock: break;
       case StmtKindIfElse: break;
       case StmtKindWhile: break;
@@ -765,7 +832,8 @@ StmtId parse_func_decl(Parser* p) {
 
   if (parser_eat_match(p, TokParenLeft, "expect open parenthesis '(' after fn keyword") == NULL) return -1;
 
-  FnParamVec params = {0};
+  IntVec params = {0};
+  TokenRefVec params_names = {0};
 
   while(!parser_is_at_end(p)) {
     // no params
@@ -778,11 +846,11 @@ StmtId parse_func_decl(Parser* p) {
     if (name == NULL) goto error;
     if (parser_eat_match(p, TokColon, "expect ':' after function parameter name") == NULL) goto error;
 
-    int type_id = parse_type(p);
+    TypeId type_id = parse_type(p);
     if (type_id == -1) goto error;
 
-    FnParam param = { str_clone(p->src + name->offset, name->len), type_id }; 
-    VEC_PUSH(params, param);
+    VEC_PUSH(params_names, name);
+    VEC_PUSH(params, type_id);
 
     Token* t = parser_eat(p);
     if (t->kind == TokParenRight) break;
@@ -795,14 +863,14 @@ StmtId parse_func_decl(Parser* p) {
     }
   }
 
-  int ret_id = -1;
+  TypeId ret_id = -1;
   Token* arrow = parser_eat_if(p, TokArrow);
   if (arrow != NULL) {
     ret_id = parse_type(p);
     if (ret_id == -1) goto error;
   }
 
-  int block_id = parse_block(p);
+  StmtId block_id = parse_block(p);
 
   // TODO: look for return statements at end of each block recursively
   
@@ -819,10 +887,10 @@ StmtId parse_func_decl(Parser* p) {
   // }
 
   // build type
-  TypeAnnFunc type = {params, ret_id, block_id};
-  int type_id = parser_push_type(p, (TypeAnn) { TypeAnnKindFunc, .func = type });
+  TypeAnnFunc type = {params, ret_id};
+  TypeId type_id = parser_push_type(p, (TypeAnn) { TypeAnnKindFunc, .func = type });
 
-  StmtFnDecl func = { func_name, type_id };
+  StmtFnDecl func = { func_name, params_names, type_id, block_id };
   return parser_push_stmt(p, (Stmt) { StmtKindFnDecl, .func_decl = func });
 
   error:
@@ -876,8 +944,8 @@ Parser parser_init(char* src) {
   return p;
 }
 
-void parse(Parser* p) {
-  parser_clear(p);
+bool parse(Parser* p) {
   p->tokens = tokenize(p->src);
   while (!parser_is_at_end(p)) VEC_PUSH(p->top_lvl_stmts, parse_stmt(p));
+  return p->had_errors;
 }

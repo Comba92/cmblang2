@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdarg.h>
 
 typedef uint8_t   u8;
 typedef int8_t    i8;
@@ -57,11 +58,32 @@ typedef struct { \
 VEC_DEF_NAMED(IntVec, int);
 VEC_DEF_NAMED(String, char);
 
+
+#define str_fmt "%.*s"
+
 char* str_clone(char* str, int len) {
   char* res = (char*) malloc(len + 1);
   memcpy(res, str, len);
   res[len] = '\0';
   return res;
+}
+
+static char FMT_BUF[2048];
+char* fmt(char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  int real_size = vsnprintf(NULL, 0, fmt, args);
+  va_end(args);
+
+  // real_size excludes null
+  real_size += 1;
+  
+  va_start(args, fmt);
+  // should write_real_size + null
+  real_size = vsnprintf(FMT_BUF, real_size, fmt, args);
+  va_end(args);
+
+  return FMT_BUF;
 }
 
 void string_append(String* sb, char* sv) {
@@ -88,12 +110,18 @@ char* file_read_to_string(char* path) {
   long size = ftell(f);
   if (size < 0) return NULL;
 
+  if (fseek(f, 0, SEEK_SET) != 0) return NULL;
+
   char* buf = (char*) malloc(size);
   if (buf == NULL) return NULL;
 
   int read = fread(buf, 1, size, f);
   if (read != size) return NULL;
-  else return buf;
+  else {
+    // not necessarily null terminated
+    buf[read] = '\0';
+    return buf;
+  };
 }
 
 void stdin_read_line(char* buf, int len) {

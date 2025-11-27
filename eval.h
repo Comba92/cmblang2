@@ -29,7 +29,7 @@ struct Value {
     double f;
     bool b;
     ValueArray arr;
-    TypeAnnFunc func;
+    StmtFnDecl func;
   };
 };
 
@@ -37,7 +37,7 @@ Value make_err_value() {
   return (Value) { .kind = ValueKindErr };
 }
 
-Value make_int_value(double val) {
+Value make_int_value(int val) {
   return (Value) { ValueKindInt, .i = val };
 }
 
@@ -49,7 +49,7 @@ Value make_bool_value(bool val) {
   return (Value) { ValueKindBool, .b = val };
 }
 
-Value make_func_value(TypeAnnFunc func) {
+Value make_func_value(StmtFnDecl func) {
   return (Value) { ValueKindFunc, .func = func };
 }
 
@@ -68,27 +68,27 @@ EnvVarVec* env_top(EnvVarScopes* env) {
   return &env->data[env->len-1];
 }
 
-void env_insert_with_str(EnvVarScopes* env, char* str, Value val) {
-  EnvVarVec* scope = env_top(env);
+// void env_insert_with_str(EnvVarScopes* env, char* str, Value val) {
+//   EnvVarVec* scope = env_top(env);
 
-  int present_idx = -1;
-  VEC_FOR(*scope) {
-    EnvVar it = scope->data[i];
-    if (strcmp(it.name, str) == 0) {
-      present_idx = i;
-      break;
-    }
-  }
+//   int present_idx = -1;
+//   VEC_FOR(*scope) {
+//     EnvVar it = scope->data[i];
+//     if (strcmp(it.name, str) == 0) {
+//       present_idx = i;
+//       break;
+//     }
+//   }
 
-  if (present_idx == -1) {
-    // we own the identifier name string
-    char* name = strdup(str);
-    EnvVar v = { name, val };
-    VEC_PUSH(*scope, v);
-  } else {
-    scope->data[present_idx].val = val;
-  }
-}
+//   if (present_idx == -1) {
+//     // we own the identifier name string
+//     char* name = strdup(str);
+//     EnvVar v = { name, val };
+//     VEC_PUSH(*scope, v);
+//   } else {
+//     scope->data[present_idx].val = val;
+//   }
+// }
 
 void env_insert(EnvVarScopes* env, char* src, Token* tok, Value val) {
   char* start = src + tok->offset;
@@ -175,11 +175,11 @@ Value eval_expr(Context* ctx, int expr_id) {
   EnvVarScopes* env = &ctx->env;
   Parser* p = ctx->p;
 
-  Expr* e = parser_get_expr(p, expr_id);
+  Expr e = parser_get_expr(p, expr_id);
 
-  switch (e->kind) {
+  switch (e.kind) {
     case ExprKindLiteral: {
-      ExprLiteral lit = e->lit;
+      ExprLiteral lit = e.lit;
 
       Value v;
       switch (lit.kind) {
@@ -231,7 +231,7 @@ Value eval_expr(Context* ctx, int expr_id) {
     } break;
 
     case ExprKindVariable: {
-      Value* res = env_find(env, p->src, e->ident);
+      Value* res = env_find(env, p->src, e.ident);
       if (res == NULL) {
         eval_log_err(ctx, "undefined variable");
         return make_err_value();
@@ -241,7 +241,7 @@ Value eval_expr(Context* ctx, int expr_id) {
     } break;
 
     case ExprKindUnary: {
-      ExprUnary un = e->un;
+      ExprUnary un = e.un;
       Value rhs = eval_expr(ctx, un.expr);
 
       Value v = {0};
@@ -283,7 +283,7 @@ Value eval_expr(Context* ctx, int expr_id) {
     }
 
     case ExprKindBinary: {
-      ExprBinary bin = e->bin;
+      ExprBinary bin = e.bin;
       Value lhs = eval_expr(ctx, bin.lhs_id);
       Value rhs = eval_expr(ctx, bin.rhs_id);
       
@@ -416,30 +416,20 @@ Value eval_expr(Context* ctx, int expr_id) {
     } break;
 
     case ExprKindCall: {
-      printf("Calling function\n");
-      ExprCall call = e->call;
+      ExprCall call = e.call;
       Value val = eval_expr(ctx, call.callee_id);
-      printf("Got functoin identifier\n");
 
       env_push_scope(env);
       // add arguments to scope
       VEC_FOR(call.args) {
-        int expr_id = call.args.data[i];
-        FnParam param = val.func.params.data[i];
-        printf("Argument: %s\n", param.name);
-        env_insert_with_str(env, param.name, eval_expr(ctx, expr_id)); 
+        ExprId expr_id = call.args.data[i];
+        Token* name = val.func.params_names.data[i];
+        env_insert(env, p->src, name, eval_expr(ctx, expr_id)); 
       }
-      printf("Args pushed\n");
 
-      Stmt* block = parser_get_stmt(p, val.func.block_id);
-      printf("Block got: %d, len: %d\n", val.func.block_id, block->block.stmt_ids.len);
-      
-      eval_block(ctx, block->block.stmt_ids);
-      printf("Block evaluated\n");
-      
+      Stmt block = parser_get_stmt(p, val.func.block_id);
+      eval_block(ctx, block.block.stmt_ids);
       env_pop_scope(env);
-
-      printf("Env popped\n");
     } break;
   }
 
@@ -451,60 +441,60 @@ void eval_block(Context* ctx, IntVec stmts) {
   Parser* p = ctx->p;
 
   VEC_FOR(stmts) {
-    Stmt* s = parser_get_stmt(p, stmts.data[i]);
+    Stmt s = parser_get_stmt(p, stmts.data[i]);
 
-    switch(s->kind) {
+    switch(s.kind) {
       case StmtKindDecl: {
-        Value val = eval_expr(ctx, s->decl.rhs_id);
-        env_insert(env, p->src, s->decl.name, val);
+        Value val = eval_expr(ctx, s.decl.rhs_id);
+        env_insert(env, p->src, s.decl.name, val);
       } break;
 
       case StmtKindFnDecl: {
-        StmtFnDecl decl = s->func_decl;
-        TypeAnn* signature = parser_get_type(p, decl.type_id);
-        Value v = make_func_value(signature->func);
+        StmtFnDecl decl = s.func_decl;
+        // TypeAnn signature = parser_get_type(p, decl.signature_id);
+        Value v = make_func_value(decl);
         env_insert(env, p->src, decl.name, v);
       } break;
 
       case StmtKindAssign: {
-        Value* var = env_find(env, p->src, s->assign.var);
+        Value* var = env_find(env, p->src, s.assign.var);
         if (var == NULL) {
           eval_log_err(ctx, "undeclared variable");
           return;
         } else {
-          Value res = eval_expr(ctx, s->assign.rhs_id);
+          Value res = eval_expr(ctx, s.assign.rhs_id);
           *var = res;
         }
       } break;
 
       case StmtKindBlock: {
         env_push_scope(env);
-        eval_block(ctx, s->block.stmt_ids);
+        eval_block(ctx, s.block.stmt_ids);
         env_pop_scope(env);
       } break;
 
       case StmtKindIfElse: {
-        StmtIfElse if_else = s->if_else;
+        StmtIfElse if_else = s.if_else;
         Value cond = eval_expr(ctx, if_else.cond_id);
 
         int block_id = cond.b ? if_else.if_id : if_else.else_id;
 
         if (block_id != -1) {
           env_push_scope(env);
-          Stmt* block = parser_get_stmt(p, block_id);
-          eval_block(ctx, block->block.stmt_ids);
+          Stmt block = parser_get_stmt(p, block_id);
+          eval_block(ctx, block.block.stmt_ids);
           env_pop_scope(env);
         }
       } break;
 
       case StmtKindWhile: {
-        StmtWhile wloop = s->wloop;
+        StmtWhile wloop = s.wloop;
         Value cond = eval_expr(ctx, wloop.cond_id);
 
-        Stmt* block = parser_get_stmt(p, wloop.block_id);
+        Stmt block = parser_get_stmt(p, wloop.block_id);
         while (cond.b) {
           env_push_scope(env);
-          eval_block(ctx, block->block.stmt_ids);
+          eval_block(ctx, block.block.stmt_ids);
           env_pop_scope(env);
 
           cond = eval_expr(ctx, wloop.cond_id);
@@ -512,7 +502,7 @@ void eval_block(Context* ctx, IntVec stmts) {
       } break;
 
       case StmtKindExpr: {
-        Value res = eval_expr(ctx, s->expr_id);
+        Value res = eval_expr(ctx, s.expr_id);
         switch (res.kind) {
           case ValueKindInt: printf("Int: %d\n", res.i); break;
           case ValueKindFloat: printf("Float: %lf\n", res.f); break;
