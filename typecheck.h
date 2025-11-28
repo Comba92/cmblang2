@@ -215,9 +215,27 @@ TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
       if (type.kind != TypeAnnKindFunc) {
         typecheck_err(tbl, fmt("expect function for call operation, got %d", type.kind));
         return -1;
-      } else {
-        return type.func.ret_id;
       }
+      
+      TypeAnnFunc signature = type.func;
+
+      if (call.args.len != signature.params_ids.len) {
+        typecheck_err(tbl, "wrong number of arguments in function call");
+        return -1;
+      }
+
+      VEC_FOR(call.args) {
+        ExprId arg_id = call.args.data[i];
+        TypeId param_type = signature.params_ids.data[i];
+        
+        TypeId expr_type = typecheck_expr(tbl, arg_id);
+        if (!typecheck_eq(tbl, expr_type, param_type)) {
+          typecheck_err(tbl, "wrong arguments types in function call");
+          return -1;
+        }
+      }
+
+      return type.func.ret_id;
     } break;
   }
 

@@ -32,12 +32,18 @@ typedef enum {
   LiteralKindTrue,
   LiteralKindFalse,
   LiteralKindArray,
-  LiteralKindFunc,
+  // LiteralKindFunc,
 } LiteralKind;
 
 typedef struct {
   IntVec expr_ids;
 } LiteralArray;
+
+// typedef struct {
+//   TokenRefVec args_names;
+//   IntVec args_ids;
+   
+// } LiteralFunc;
 
 typedef struct {
   LiteralKind kind;
@@ -609,7 +615,10 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
         } else {
           // collect args
           IntVec args = collect_expr_list(p, TokComma, TokParenRight, "expect ',' or parenthesis closing ')' for function call arguments");
-          if (args.len == 0) return -1;
+          if (args.len == 0) {
+            parse_log_err(p, "fucked up args parsing\n");
+            return -1;
+          }
           lhs = parser_push_expr(p, call(lhs, args));
         }
       } else {
