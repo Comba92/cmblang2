@@ -274,7 +274,13 @@ TokenVec tokenize(char* str) {
           t.kind = TokIdent;
           t.len = len;
         } else {
-          fprintf(stderr, "[LEX ERR] Invalid token (%c) at col = %d line = %d\n", c, column, line);
+          t.offset = consumed;
+          t.column = column;
+          t.line = line;
+
+          fprintf(stderr, "[LEX ERR] Invalid token ");
+          tok_dbg(t, str);
+
           t = tok_sym(TokErr);
         }
       } break;

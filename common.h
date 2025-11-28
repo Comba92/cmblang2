@@ -112,7 +112,8 @@ char* file_read_to_string(char* path) {
 
   if (fseek(f, 0, SEEK_SET) != 0) return NULL;
 
-  char* buf = (char*) malloc(size);
+  // save space for null char
+  char* buf = (char*) malloc(size+1);
   if (buf == NULL) return NULL;
 
   int read = fread(buf, 1, size, f);

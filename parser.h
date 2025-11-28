@@ -32,6 +32,7 @@ typedef enum {
   LiteralKindTrue,
   LiteralKindFalse,
   LiteralKindArray,
+  LiteralKindFunc,
 } LiteralKind;
 
 typedef struct {
@@ -246,6 +247,7 @@ bool type_eq(Parser* p, TypeAnn a, TypeAnn b) {
   if (a.kind != b.kind) return false;
 
   switch(a.kind) {
+    case TypeAnnKindVoid:
     case TypeAnnKindInt:
     case TypeAnnKindFloat:
     case TypeAnnKindBool:
@@ -278,6 +280,15 @@ bool type_eq(Parser* p, TypeAnn a, TypeAnn b) {
   return false;
 }
 
+TypeId parser_get_type_id(Parser* p, TypeAnn t) {
+  VEC_FOR(p->types) {
+    TypeAnn it = p->types.data[i];
+    if (type_eq(p, it, t)) return i;
+  }
+
+  return -1;
+}
+
 TypeId parser_push_type(Parser* p, TypeAnn t) {
   VEC_FOR(p->types) {
     TypeAnn it = p->types.data[i];
@@ -297,11 +308,30 @@ bool parser_is_at_end(Parser* p) {
   return p->curr_token >= p->tokens.len;
 }
 
+void parse_log_err(Parser* p, const char* err) {
+  p->had_errors = true;
+  if (p->is_panicking) return;
+
+  p->err = err;
+  
+  int token_id = p->curr_token-1;
+  Token tok = p->tokens.data[token_id];
+  fprintf(stderr, "[PARSE ERR] %s at token %d: ", err, token_id);
+
+  if (tok.kind < TokErr) {
+    printf("kind = '%c' column = %d line = %d\n", tok.kind, tok.column, tok.line);
+  } else {
+    printf("kind = %s offset = %d line = %d len = %d '%.*s'\n", TOKEN_DBG[tok.kind - TokErr - 1], tok.column, tok.line, tok.len, tok.len, p->src + tok.offset);
+  }
+
+  p->is_panicking = true;
+}
+
 Token* parser_peek(Parser* p) {
   return &p->tokens.data[p->curr_token];
 }
 
-Token TOK_ERR = { TokErr, -1, 1 };
+Token TOK_ERR = { TokErr, 1, -1, -1, -1 };
 Token* parser_peek_nth(Parser* p, int n) {
   int idx = n + p->curr_token;
   return idx < p->tokens.len ? &p->tokens.data[idx] : &TOK_ERR;
@@ -333,26 +363,6 @@ void parser_eat_until_safe(Parser* p) {
   }
 
   p->is_panicking = false;
-}
-
-void parse_log_err(Parser* p, const char* err) {
-  p->had_errors = true;
-  if (p->is_panicking) return;
-
-  p->err = err;
-  
-  int token_id = p->curr_token-1;
-  Token tok = p->tokens.data[token_id];
-  int column = tok.offset;
-  fprintf(stderr, "[PARSE ERR] %s at token %d: ", err, token_id);
-
-  if (tok.kind < TokErr) {
-    printf("kind = '%c' column = %d line = %d\n", tok.kind, tok.column, tok.line);
-  } else {
-    printf("kind = %s offset = %d line = %d len = %d '%.*s'\n", TOKEN_DBG[tok.kind - TokErr - 1], tok.column, tok.line, tok.len, tok.len, p->src + tok.offset);
-  }
-
-  p->is_panicking = true;
 }
 
 void parser_clear(Parser *p) {
@@ -563,6 +573,9 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
       IntVec exprs = collect_expr_list(p, TokComma, TokBraceRight, "expected ',' or brace closing ']' for array literal");
       if (exprs.len == 0) return -1;
 
+      // build type
+      TypeAnn type = {TypeAnnKindArray, .inner_id = TypeAnnKindUnknown};
+      parser_push_type(p, type);
       return parser_push_expr(p, literal_array(exprs));
       break;
 
@@ -807,7 +820,7 @@ StmtId parse_func_decl(Parser* p) {
   if (func_name == NULL) return -1;
 
   if (parser_eat_match(p, TokParenLeft, "expect open parenthesis '(' after fn keyword") == NULL) return -1;
-
+  
   IntVec params = {0};
   TokenRefVec params_names = {0};
 

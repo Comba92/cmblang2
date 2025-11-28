@@ -49,8 +49,8 @@ int main() {
   Symtbl tbl = symtbl_init(&parser);
   Context ctx = ctx_init(&parser);
 
-  // TokenVec tokens = tokenize(text);
-  // VEC_FOREACH(Token, tokens) tok_dbg(*it, text);
+  TokenVec tokens = tokenize(text);
+  VEC_FOREACH(Token, tokens) tok_dbg(*it, text);
 
   if (!parse(&parser)) return 2;
   VEC_FOREACH(Expr, parser.exprs) expr_dbg(*it);
@@ -61,7 +61,7 @@ int main() {
   if (!typecheck(&tbl)) return 3;
   symtbl_dbg(&tbl);
   
-  eval(&ctx);
+  // eval(&ctx);
 
   return 0;
 }
