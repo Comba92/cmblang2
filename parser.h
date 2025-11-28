@@ -899,6 +899,8 @@ StmtId parse_stmt(Parser* p) {
       else {
         // expression
         int id = parse_expr(p, 0);
+
+        // TODO: what happens here?
         if (id == -1) printf("FUUUU\n"); 
         stmt = parser_push_stmt(p, (Stmt) {StmtKindExpr, .expr_id = id});
       }

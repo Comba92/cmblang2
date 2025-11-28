@@ -101,7 +101,7 @@ void string_append_n(String* sb, char* sv, int n) {
   }
 }
 
-char* file_read_to_string(char* path) {
+char* file_read_to_string(char* path, int* len) {
   FILE* f = fopen(path, "rb");
   if (f == NULL) return NULL;
   
@@ -121,6 +121,7 @@ char* file_read_to_string(char* path) {
   else {
     // not necessarily null terminated
     buf[read] = '\0';
+    *len = read;
     return buf;
   };
 }

@@ -37,7 +37,8 @@ int main() {
   // DEBUG_LIST
   // #undef X
 
-  char* text = file_read_to_string("test.cmb");
+  int src_len = 0;
+  char* text = file_read_to_string("test.cmb", &src_len);
   if (text == NULL) {
     fprintf(stderr, "Failed to open file\n");
     return 1;

@@ -1,4 +1,4 @@
-- [ ] Comments
+- [x] Comments
 - [ ] Better return check
 - [ ] Return eval (have to store return indexes)
 - [ ] Better assignments, and variables declarations (symtbl)

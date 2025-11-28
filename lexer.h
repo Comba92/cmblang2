@@ -177,17 +177,21 @@ Token lexer_eat_if_or(char* s, char match, TokenKind tok, TokenKind or) {
   }
 }
 
-TokenVec tokenize(char* str) {
+// TODO: consider passing src len here
+TokenVec tokenize(char* src) {
   TokenVec tokens = {0};
 
   int consumed = 0;
   int column = 0;
   int line = 0;
 
-  while (1) {
+
+  start: while (1) {
+    // TODO: some edge cases are not handled here
+
     // skip whitespace
-    while (isspace(*str)) {
-      if (*str == '\n') {
+    while (isspace(*src)) {
+      if (*src == '\n') {
         column = 0;
         line++;
       } else {
@@ -195,10 +199,10 @@ TokenVec tokenize(char* str) {
       }
       
       consumed++;
-      str++;
+      src++;
     }
 
-    char c = *str;
+    char c = *src;
     Token t;
     switch(c) {
       case '(':
@@ -221,19 +225,77 @@ TokenVec tokenize(char* str) {
         t = tok_sym(c);
         break;
 
-      case '/': t = lexer_eat_if_or(str, '/', Tok2Slash, TokDiv); break;
-      case '.': t = lexer_eat_if_or(str, '.', Tok2Dot, TokDot); break;
-      case '-': t = lexer_eat_if_or(str, '>', TokArrow, TokSub); break;
-      case '=': t = lexer_eat_if_or(str, '=', TokEq, TokAssign); break;
-      case '<': t = lexer_eat_if_or(str, '=', TokLessEq, TokLess); break;
-      case '>': t = lexer_eat_if_or(str, '=', TokGreatEq, TokGreat); break;
-      case '!': t = lexer_eat_if_or(str, '=', TokNotEq, TokBang); break;
+      case '.': t = lexer_eat_if_or(src, '.', Tok2Dot, TokDot); break;
+      case '-': t = lexer_eat_if_or(src, '>', TokArrow, TokSub); break;
+      case '=': t = lexer_eat_if_or(src, '=', TokEq, TokAssign); break;
+      case '<': t = lexer_eat_if_or(src, '=', TokLessEq, TokLess); break;
+      case '>': t = lexer_eat_if_or(src, '=', TokGreatEq, TokGreat); break;
+      case '!': t = lexer_eat_if_or(src, '=', TokNotEq, TokBang); break;
       case ':': {
-        char next = *(str + 1);
+        char next = *(src + 1);
         if (next == ':') t = tok_sym2(Tok2Colon);
         else if (next == '=') t = tok_sym2(TokDecl);
         else t = tok_sym(TokColon);
       }; break;
+
+      case '/': {
+        // line comment
+        char next = *(src + 1);
+        if (next == '/') {
+          int len = 2;
+          while (src[len] != '\0') {
+            if (src[len++] == '\n') break;
+          }
+
+          src += len;
+          consumed += len;
+          line++;
+          column = 0;
+
+          goto start;
+        } else if (next == '*') {
+          // block comment
+          
+          // TODO: this code is fucking hideous
+          int len = 2;
+          int nesting = 1;
+
+          while (src[len] != '\0') {
+            if (src[len] == '\n') {
+              len++;
+              line++;
+              column = 0;
+              continue;
+            } else {
+              column++;
+            }
+
+            char first = src[len];
+            char second = src[len+1];
+
+            if (first == '*' && second == '/') nesting--;
+            else if (first == '/' && second == '*') nesting++;
+
+            len++;
+            if (nesting == 0) {
+              // eat last '/'
+              len++;
+              break;
+            }
+          }
+          
+          if (nesting != 0) {
+            fprintf(stderr, "[LEX ERR] Unclosed block comment\n");
+          }
+
+          src += len;
+          consumed += len;
+          
+          goto start;
+        } else {
+          t = tok_sym(TokDiv);
+        }
+      } break;
 
       case '\0':
         return tokens;
@@ -242,10 +304,10 @@ TokenVec tokenize(char* str) {
         if (isdigit(c)) {
           // number literal
           int len = 1;
-          while (str[len] != '\0' && isdigit(str[len])) len++;
-          if (str[len] == '.') {
+          while (src[len] != '\0' && isdigit(src[len])) len++;
+          if (src[len] == '.') {
             len++;
-            while (str[len] != '\0' && isdigit(str[len])) len++;
+            while (src[len] != '\0' && isdigit(src[len])) len++;
             t.kind = TokFloatLit; 
             t.len = len;
           } else {
@@ -258,7 +320,7 @@ TokenVec tokenize(char* str) {
           for (int i=0; i<KEYWORDS_LEN; i++) {
             KeywordData keyword = KEYWORDS[i];
             // len doesn't include null char
-            if (strncmp(str, keyword.name, keyword.len) == 0) {
+            if (strncmp(src, keyword.name, keyword.len) == 0) {
               t.kind = keyword.kind; 
               t.len = keyword.len;
               is_keyword = true;
@@ -270,7 +332,7 @@ TokenVec tokenize(char* str) {
 
           // not a keyword, must be an ident
           int len = 1;
-          while (str[len] != '\0' && (isalnum(str[len]) || str[len] == '_')) len++;
+          while (src[len] != '\0' && (isalnum(src[len]) || src[len] == '_')) len++;
           t.kind = TokIdent;
           t.len = len;
         } else {
@@ -279,7 +341,7 @@ TokenVec tokenize(char* str) {
           t.line = line;
 
           fprintf(stderr, "[LEX ERR] Invalid token ");
-          tok_dbg(t, str);
+          tok_dbg(t, src);
 
           t = tok_sym(TokErr);
         }
@@ -291,7 +353,7 @@ TokenVec tokenize(char* str) {
     t.line = line;
 
     VEC_PUSH(tokens, t);
-    str += t.len;
+    src += t.len;
     column += t.len;
     consumed += t.len;
   }
