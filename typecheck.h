@@ -147,7 +147,7 @@ TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
           }
 
           TypeAnn arr_type = new_arr(prev_type, ids.len);
-          return parser_get_type_id(tbl->parser, arr_type);
+          return parser_push_type(tbl->parser, arr_type);
         } break;
       }
     } break;
@@ -194,13 +194,6 @@ TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
       ExprBinary bin = e.bin;
       int lhs_type = typecheck_expr(tbl, bin.lhs_id);
       int rhs_type = typecheck_expr(tbl, bin.rhs_id);
-      TypeAnn lt = parser_get_type(tbl->parser, lhs_type);
-      TypeAnn rt = parser_get_type(tbl->parser, rhs_type);
-
-      if (lt.kind == TypeAnnKindArray && rt.kind == TypeAnnKindInt) {
-        // array access
-        return 1;
-      }
 
       if (!typecheck_eq(tbl, lhs_type, rhs_type)) {
         typecheck_err(tbl, "invalid binary operation on different types");
@@ -240,6 +233,21 @@ TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
 
       return type.func.ret_id;
     } break;
+
+    case ExprKindIndex: {
+      ExprIndex idx = e.idx;
+      int lhs_type = typecheck_expr(tbl, idx.lhs);
+      int rhs_type = typecheck_expr(tbl, idx.idx);
+      TypeAnn lt = parser_get_type(tbl->parser, lhs_type);
+      TypeAnn rt = parser_get_type(tbl->parser, rhs_type);
+
+      if (lt.kind == TypeAnnKindArray && rt.kind == TypeAnnKindInt) {
+        // array access
+        return lt.arr.inner_id;
+      } else {
+        return -1;
+      }
+    }
   }
 
   return -1;

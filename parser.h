@@ -566,11 +566,13 @@ Expr call(ExprId lhs, IntVec args) {
 }
 
 Expr indexing(ExprId lhs, ExprId idx) {
-
+  ExprIndex indexing =  {lhs, idx};
+  return (Expr) { ExprKindIndex, .idx = indexing };
 }
 
 Expr member(ExprId lhs, Token* field) {
-
+  ExprMember member =  {lhs, field};
+  return (Expr) { ExprKindMember, .memb = member };
 }
 
 ExprId parse_expr(Parser* parser, int prec_lvl);
@@ -674,8 +676,7 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
         // array indexing
         ExprId rhs = parse_expr(p, 0);
         if (parser_eat_match(p, TokBraceRight, "unclosed brace '[' for array indexing expression") == NULL) return -1;
-        
-        lhs = parser_push_expr(p, binary(lhs, op, rhs));
+        lhs = parser_push_expr(p, indexing(lhs, rhs));
       } else if (op->kind == TokDot) {
         // member access
         // TODO 
