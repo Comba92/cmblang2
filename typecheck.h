@@ -123,14 +123,17 @@ TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
 
         case LiteralKindArray: {
           IntVec ids = lit.arr.expr_ids;
+          
+          // uninit array
+          if (ids.len == 0) return TypeAnnKindUnknown;
 
-          int expr_id = ids.data[0];
-          int prev_type = typecheck_expr(tbl, expr_id);
+          ExprId expr_id = ids.data[0];
+          TypeId prev_type = typecheck_expr(tbl, expr_id);
 
           bool same_type = true;
           for(int i=1; i<ids.len; i++) {
             expr_id = ids.data[i];
-            int curr_type = typecheck_expr(tbl, expr_id);
+            TypeId curr_type = typecheck_expr(tbl, expr_id);
             if (!typecheck_eq(tbl, prev_type, curr_type)) {
               same_type = false;
               break;
@@ -143,7 +146,7 @@ TypeId typecheck_expr(Symtbl* tbl, int expr_id) {
             return -1;
           }
 
-          TypeAnn arr_type = {TypeAnnKindArray, prev_type};
+          TypeAnn arr_type = new_arr(prev_type, ids.len);
           return parser_get_type_id(tbl->parser, arr_type);
         } break;
       }
@@ -310,11 +313,21 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
         StmtDecl decl = s.decl;
         TypeId expr_type = typecheck_expr(tbl, decl.rhs_id);
 
-        // if it is unknown, we infer it from the right expr
-        if (s.decl.type_id != TypeAnnKindUnknown && !typecheck_eq(tbl, expr_type, decl.type_id)) {
+        // TODO: might be handler better logically?
+        if (decl.type_id == TypeAnnKindUnknown && expr_type == TypeAnnKindUnknown) {
+          typecheck_err(tbl, "couldn't infer variable type");
+        } else if (decl.type_id == TypeAnnKindUnknown) {
+          // if no type annotation, infer right expr
+          symtbl_insert(tbl, expr_type, decl.name);
+        } else if (expr_type == TypeAnnKindUnknown) {
+          // we got an unknown expression, but we have annotation
+          symtbl_insert(tbl, decl.type_id, decl.name);
+        } else if (typecheck_eq(tbl, decl.type_id, expr_type)) {
+          // same types
+          symtbl_insert(tbl, decl.type_id, decl.name);
+        } else {
           typecheck_err(tbl, "assignment of different type");
         }
-        symtbl_insert(tbl, expr_type, decl.name);
       } break;
 
       case StmtKindFnDecl: {
@@ -341,6 +354,10 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
 
         typecheck_block(tbl, block.stmt_ids);
         symtbl_pop_scope(tbl);
+      } break;
+
+      case StmtKindStructDecl: {
+        // TODO: probably will have to check type existance here
       } break;
 
       case StmtKindAssign: {

@@ -2,7 +2,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "typecheck.h"
-#include "eval.h"
+// #include "eval.h"
 
 #define DEBUG_LIST \
   X(IntVec) \
@@ -48,10 +48,10 @@ int main() {
 
   Parser parser = parser_init(text);
   Symtbl tbl = symtbl_init(&parser);
-  Context ctx = ctx_init(&parser);
+  // Context ctx = ctx_init(&parser);
 
-  TokenVec tokens = tokenize(text);
-  VEC_FOREACH(Token, tokens) tok_dbg(*it, text);
+  // TokenVec tokens = tokenize(text);
+  // VEC_FOREACH(Token, tokens) tok_dbg(*it, text);
 
   if (!parse(&parser)) return 2;
   VEC_FOREACH(Expr, parser.exprs) expr_dbg(*it);

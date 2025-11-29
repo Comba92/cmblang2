@@ -13,6 +13,8 @@ typedef int TypeId;
   X(ExprKindUnary) \
   X(ExprKindBinary) \
   X(ExprKindCall) \
+  X(ExprKindMember) \
+  X(ExprKindIndex) \
 
 #define X(E) #E,
 const char* EXPR_DBG[] = {
@@ -32,6 +34,7 @@ typedef enum {
   LiteralKindTrue,
   LiteralKindFalse,
   LiteralKindArray,
+  // LiteralKindArrayFill,
   // LiteralKindFunc,
 } LiteralKind;
 
@@ -70,6 +73,16 @@ typedef struct {
 } ExprCall;
 
 typedef struct {
+  ExprId lhs;
+  Token* field;
+} ExprMember;
+
+typedef struct {
+  ExprId lhs;
+  ExprId idx;
+} ExprIndex;
+
+typedef struct {
   ExprKind kind;
   union {
     ExprLiteral lit;
@@ -77,6 +90,8 @@ typedef struct {
     ExprUnary un;
     ExprBinary bin;
     ExprCall call;
+    ExprMember memb;
+    ExprIndex idx;
   };
 } Expr;
 VEC_DEF(Expr);
@@ -86,15 +101,16 @@ void expr_dbg(Expr e) {
 }
 
 #define PRIMITIVES_LIST \
+  X(Unknown) \
   X(Void) \
   X(Int) \
   X(Float) \
   X(Bool) \
-  X(Unknown) \
 
 #define TYPES_LIST \
   X(Array) \
   X(Func) \
+  X(Struct) \
 
 #define X(T) #T,
 const char* TYPE_DBG[] = {
@@ -116,11 +132,27 @@ typedef struct {
 } TypeAnnFunc;
 
 typedef struct {
+  TypeId inner_id;
+  int len;
+} TypeAnnArray;
+
+typedef struct {
+  Token* name;
+  TypeId type_id;
+} StructField;
+VEC_DEF(StructField);
+
+typedef struct {
+  StructFieldVec fields;
+} TypeAnnStruct;
+
+typedef struct {
   TypeAnnKind kind;
   union {
     LiteralKind prim;
-    TypeId inner_id;
+    TypeAnnArray arr;
     TypeAnnFunc func;
+    TypeAnnStruct strct;
   };
 } TypeAnn;
 VEC_DEF(TypeAnn);
@@ -129,10 +161,26 @@ void type_dbg(TypeAnn t) {
   printf("[TYPE] kind = %s\n", TYPE_DBG[t.kind]);
 }
 
+TypeAnn new_func(IntVec params, TypeId ret) {
+  TypeAnnFunc func = { params, ret };
+  return (TypeAnn) {TypeAnnKindFunc, .func = func };
+}
+
+TypeAnn new_arr(TypeId inner, int len) {
+  TypeAnnArray arr = { inner, len };
+  return (TypeAnn) {TypeAnnKindArray, .arr = arr };
+}
+
+TypeAnn new_struct(StructFieldVec fields) {
+  TypeAnnStruct strct = { fields };
+  return (TypeAnn) {TypeAnnKindStruct, .strct = strct };
+}
+
 #define STMT_LIST \
   X(StmtKindExpr) \
   X(StmtKindDecl) \
   X(StmtKindFnDecl) \
+  X(StmtKindStructDecl) \
   X(StmtKindAssign) \
   X(StmtKindBlock) \
   X(StmtKindIfElse) \
@@ -170,6 +218,11 @@ typedef struct {
 } StmtFnDecl;
 
 typedef struct {
+  Token* name;
+  TypeId type_id;
+} StmtStructDecl;
+
+typedef struct {
   Token* var;
   StmtId rhs_id;
 } StmtAssign;
@@ -199,6 +252,7 @@ struct Stmt {
   union {
     StmtDecl decl;
     StmtFnDecl func_decl;
+    StmtStructDecl strct;
     StmtAssign assign;
     StmtBlock block;
     StmtIfElse if_else;
@@ -253,6 +307,8 @@ bool type_eq(Parser* p, TypeAnn a, TypeAnn b) {
   if (a.kind != b.kind) return false;
 
   switch(a.kind) {
+    case TypeAnnKindUnknown: return false;
+
     case TypeAnnKindVoid:
     case TypeAnnKindInt:
     case TypeAnnKindFloat:
@@ -277,9 +333,12 @@ bool type_eq(Parser* p, TypeAnn a, TypeAnn b) {
     } break;
 
     case TypeAnnKindArray: {
-      TypeAnn inner_a = parser_get_type(p, a.inner_id);
-      TypeAnn inner_b = parser_get_type(p, b.inner_id);
-      return type_eq(p, inner_a, inner_b);
+      TypeAnnArray arr_a = a.arr;
+      TypeAnnArray arr_b = b.arr;
+
+      TypeAnn inner_a = parser_get_type(p, arr_a.inner_id);
+      TypeAnn inner_b = parser_get_type(p, arr_b.inner_id);
+      return arr_a.len == arr_b.len && type_eq(p, inner_a, inner_b);
     } break;
   }
 
@@ -433,6 +492,7 @@ int postfix_lvl(Token op) {
   switch (op.kind) {
     case TokBraceLeft: return 32;
     case TokParenLeft: return 32;
+    case TokDot: return 34;
     default: return -1;
   }
 }
@@ -473,7 +533,6 @@ Expr literal_primitive(Token* t) {
     case TokFalse:    kind = LiteralKindFalse; break;
     case TokIntLit:   kind = LiteralKindInt; break;
     case TokFloatLit: kind = LiteralKindFloat; break;
-    // unreachable?
     default: return (Expr) {0};
   }
 
@@ -504,6 +563,14 @@ Expr binary(ExprId lhs, Token* op, ExprId rhs) {
 Expr call(ExprId lhs, IntVec args) {
   ExprCall call = {lhs, args};
   return (Expr) { ExprKindCall, .call = call };
+}
+
+Expr indexing(ExprId lhs, ExprId idx) {
+
+}
+
+Expr member(ExprId lhs, Token* field) {
+
 }
 
 ExprId parse_expr(Parser* parser, int prec_lvl);
@@ -570,17 +637,20 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
       break;
 
     case TokBraceLeft:
-      // empty array
+      IntVec exprs = {0};
+    
       if (parser_eat_if(p, TokBraceRight) != NULL) {
-        parse_log_err(p, "empty arrays are illegal");
-        return -1;
+        // empty array (uninit)
+        // TypeId type = parser_push_type(p, new_arr(TypeAnnKindUnknown, -1));
+        return parser_push_expr(p, literal_array(exprs));
       }
 
-      IntVec exprs = collect_expr_list(p, TokComma, TokBraceRight, "expected ',' or brace closing ']' for array literal");
+      exprs = collect_expr_list(p, TokComma, TokBraceRight, "expected ',' or brace closing ']' for array literal");
       if (exprs.len == 0) return -1;
 
       // build type
-      TypeAnn type = {TypeAnnKindArray, .inner_id = TypeAnnKindUnknown};
+      // TypeAnn type = {TypeAnnKindArray, .inner_id = TypeAnnKindUnknown};
+      TypeAnn type = new_arr(TypeAnnKindUnknown, exprs.len);
       parser_push_type(p, type);
       return parser_push_expr(p, literal_array(exprs));
       break;
@@ -606,6 +676,9 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
         if (parser_eat_match(p, TokBraceRight, "unclosed brace '[' for array indexing expression") == NULL) return -1;
         
         lhs = parser_push_expr(p, binary(lhs, op, rhs));
+      } else if (op->kind == TokDot) {
+        // member access
+        // TODO 
       } else if (op->kind == TokParenLeft) {
         // function call
 
@@ -667,9 +740,13 @@ StmtId parse_type(Parser* p) {
 
       // parse inner type
       TypeId inner = parse_type(p);
+      if (parser_eat_match(p, TokSemicolon, "expect semicolon ';' in array type annotation") == NULL) return -1;
+      Token* lit = parser_eat_match(p, TokIntLit, "expect constant integer size in array type annotation");
+      if (lit == NULL) return -1;
       if (parser_eat_match(p, TokBraceRight, "expect closing brace ']' in array type annotation") == NULL) return -1;
 
-      t = (TypeAnn) { TypeAnnKindArray, .inner_id = inner };
+      // t = (TypeAnn) { TypeAnnKindArray, .inner_id = inner };
+      t = new_arr(inner, tok_parse_int(*lit, p->src));
     } break;
 
     case TokParenLeft: {
@@ -701,13 +778,14 @@ StmtId parse_type(Parser* p) {
       }
 
       // TODO: function annotation might always require an arrow (and void if no return type)
-      TypeId ret_id = -1;
+      TypeId ret_id = TypeAnnKindVoid;
       if (parser_eat_if(p, TokArrow) != NULL) {
         ret_id = parse_type(p);
       }
 
-      TypeAnnFunc func = { params, ret_id };
-      t = (TypeAnn) { TypeAnnKindFunc, .func = func };
+      // TypeAnnFunc func = { params, ret_id };
+      // t = (TypeAnn) { TypeAnnKindFunc, .func = func };
+      t = new_func(params, ret_id);
     } break;
 
     default: 
@@ -871,14 +949,64 @@ StmtId parse_func_decl(Parser* p) {
   StmtId block_id = parse_block(p);
 
   // build type
-  TypeAnnFunc type = {params, ret_id};
-  TypeId type_id = parser_push_type(p, (TypeAnn) { TypeAnnKindFunc, .func = type });
+  // TypeAnnFunc type = {params, ret_id};
+  // TypeId type_id = parser_push_type(p, (TypeAnn) { TypeAnnKindFunc, .func = type });
+  TypeId type_id = parser_push_type(p, new_func(params, ret_id));
 
   StmtFnDecl func = { func_name, params_names, type_id, block_id };
   return parser_push_stmt(p, (Stmt) { StmtKindFnDecl, .func_decl = func });
 
   error:
     VEC_FREE(params);
+    return -1;
+}
+
+StmtId parse_struct_decl(Parser* p) {
+  // eat 'struct'
+  parser_eat(p);
+
+  Token* struct_name = parser_eat_match(p, TokIdent, "expect struct name after struct keyword");
+  if (struct_name == NULL) return -1;
+
+  if (parser_eat_match(p, TokCurlyLeft, "expect curly open '{' after struct keyword") == NULL) return -1;
+  
+  // careful: causes leak if return early
+  StructFieldVec fields = {0}; 
+  while(!parser_is_at_end(p)) {
+    // empty structs are not allowed 
+
+    StructField field;
+    Token* name = parser_eat_match(p, TokIdent, "expect struct field name in struct declaration");
+    if (name == NULL) goto error;
+    if (parser_eat_match(p, TokColon, "expect colon ':' after struct field name") == NULL) goto error;
+    TypeId type = parse_type(p);
+
+    Token* t = parser_eat(p);
+    if (t->kind == TokCurlyRight) break;
+    else if (t->kind == TokComma) {
+      // we can have a comma at the end without any expression after
+      if (parser_peek(p)->kind == TokCurlyRight) { parser_eat(p); break; }
+    } else {
+      parse_log_err(p, "expect ',' or closed curly '}' for struct declaration");
+      goto error;
+    }
+
+    field.name = name;
+    field.type_id = type;
+    VEC_PUSH(fields, field);
+  }
+
+  // build type
+  // TypeAnn type = {TypeAnnKindStruct, .strct = (TypeAnnStruct) {fields}};
+  // TypeId type_id = parser_push_type(p, type);
+  TypeId type_id = parser_push_type(p, new_struct(fields));
+
+  StmtStructDecl strct = {struct_name, type_id};
+  Stmt stmt = { StmtKindStructDecl, .strct = strct };
+  return parser_push_stmt(p, stmt);
+
+  error:
+    VEC_FREE(fields);
     return -1;
 }
 
@@ -893,6 +1021,7 @@ StmtId parse_stmt(Parser* p) {
     case TokIf: stmt = parse_if_else(p); break;
     case TokWhile: stmt = parse_while(p); break;
     case TokFn: stmt = parse_func_decl(p); break;
+    case TokStruct: stmt = parse_struct_decl(p); break;
     case TokReturn: stmt = parse_return(p); break;
 
     default: {
@@ -909,8 +1038,10 @@ StmtId parse_stmt(Parser* p) {
         // expression
         int id = parse_expr(p, 0);
 
-        // TODO: what happens here?
-        if (id == -1) printf("FUUUU\n"); 
+        if (id == -1) {
+          parse_log_err(p, "something wrong while parsing expression");
+          return -1;
+        }
         stmt = parser_push_stmt(p, (Stmt) {StmtKindExpr, .expr_id = id});
       }
     } break;

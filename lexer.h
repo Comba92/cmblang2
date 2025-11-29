@@ -147,7 +147,8 @@ bool tok_is_op(Token t) {
     || t.kind == TokGreat
     || t.kind == TokGreatEq
     || t.kind == TokLess
-    || t.kind == TokLessEq;
+    || t.kind == TokLessEq
+    || t.kind == TokDot;
 }
 
 bool tok_is_expr(Token t) {
@@ -167,6 +168,36 @@ bool tok_is_safe(Token t) {
     || t.kind == TokIf
     || t.kind == TokWhile
     || t.kind == TokFn;
+}
+
+int tok_parse_int(Token t, char* src) {
+  char* start = src + t.offset;
+  int len = t.len;
+
+  // TODO: consider using a buffer instead of allocating
+  char* str = str_clone(start, len);
+  int val = atoi(str);
+  free(str);
+
+  return val;
+}
+
+double tok_parse_double(Token t, char* src) {
+  char* start = src + t.offset;
+  int len = t.len;
+  
+  // TODO: consider using a buffer instead of allocating
+  char* str = str_clone(start, len);
+  double val = atof(str);
+  free(str);
+
+  return val;
+}
+
+char* tok_parse_str(Token t, char* src) {
+  char* start = src + t.offset;
+  int len = t.len;
+  return str_clone(start, len);
 }
 
 Token lexer_eat_if_or(char* s, char match, TokenKind tok, TokenKind or) {
