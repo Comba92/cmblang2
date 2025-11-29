@@ -54,10 +54,10 @@ int main() {
   // VEC_FOREACH(Token, tokens) tok_dbg(*it, text);
 
   if (!parse(&parser)) return 2;
-  VEC_FOREACH(Expr, parser.exprs) expr_dbg(*it);
-  VEC_FOREACH(Stmt, parser.stmts) stmt_dbg(*it);
+  // VEC_FOREACH(Expr, parser.exprs) expr_dbg(*it);
+  // VEC_FOREACH(Stmt, parser.stmts) stmt_dbg(*it);
   VEC_FOREACH(TypeAnn, parser.types) type_dbg(*it);
-  putchar('\n');
+  // putchar('\n');
 
   if (!typecheck(&tbl)) return 3;
   symtbl_dbg(&tbl);

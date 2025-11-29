@@ -370,14 +370,10 @@ void typecheck_block(Symtbl* tbl, IntVec stmts) {
 
       case StmtKindAssign: {
         StmtAssign assign = s.assign;
-        int var_type = symtbl_find(tbl, assign.var);
-        if (var_type == -1) {
-          typecheck_err(tbl, fmt("undeclared variable '"str_fmt"'",  assign.var->len, tbl->parser->src + assign.var->offset));
-        } else {
-          int expr_type = typecheck_expr(tbl, assign.rhs_id);
-          if (!typecheck_eq(tbl, var_type, expr_type)) {
-            typecheck_err(tbl, "assignment of different type");
-          }
+        TypeId lhs_type = typecheck_expr(tbl, assign.lhs_id);
+        TypeId rhs_type = typecheck_expr(tbl, assign.rhs_id);
+        if (!typecheck_eq(tbl, lhs_type, rhs_type)) {
+          typecheck_err(tbl, "assignment of different type");
         }
       } break;
 

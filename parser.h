@@ -223,8 +223,8 @@ typedef struct {
 } StmtStructDecl;
 
 typedef struct {
-  Token* var;
-  StmtId rhs_id;
+  ExprId lhs_id;
+  ExprId rhs_id;
 } StmtAssign;
 
 typedef struct {
@@ -440,6 +440,7 @@ void parser_clear(Parser *p) {
   VEC_FOR(p->types) {
     TypeAnn* t = &p->types.data[i];
     if (t->kind == TypeAnnKindFunc) VEC_FREE(t->func.params_ids);
+    if (t->kind == TypeAnnKindStruct) VEC_FREE(t->strct.fields);
   }
   p->types.len = 0;
 
@@ -643,7 +644,6 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
     
       if (parser_eat_if(p, TokBraceRight) != NULL) {
         // empty array (uninit)
-        // TypeId type = parser_push_type(p, new_arr(TypeAnnKindUnknown, -1));
         return parser_push_expr(p, literal_array(exprs));
       }
 
@@ -651,7 +651,6 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
       if (exprs.len == 0) return -1;
 
       // build type
-      // TypeAnn type = {TypeAnnKindArray, .inner_id = TypeAnnKindUnknown};
       TypeAnn type = new_arr(TypeAnnKindUnknown, exprs.len);
       parser_push_type(p, type);
       return parser_push_expr(p, literal_array(exprs));
@@ -675,7 +674,7 @@ ExprId parse_expr(Parser* p, int prec_lvl) {
       if (op->kind == TokBraceLeft) {
         // array indexing
         ExprId rhs = parse_expr(p, 0);
-        if (parser_eat_match(p, TokBraceRight, "unclosed brace '[' for array indexing expression") == NULL) return -1;
+        if (parser_eat_match(p, TokBraceRight, "unclosed brace ']' for array indexing expression") == NULL) return -1;
         lhs = parser_push_expr(p, indexing(lhs, rhs));
       } else if (op->kind == TokDot) {
         // member access
@@ -746,7 +745,6 @@ StmtId parse_type(Parser* p) {
       if (lit == NULL) return -1;
       if (parser_eat_match(p, TokBraceRight, "expect closing brace ']' in array type annotation") == NULL) return -1;
 
-      // t = (TypeAnn) { TypeAnnKindArray, .inner_id = inner };
       t = new_arr(inner, tok_parse_int(*lit, p->src));
     } break;
 
@@ -784,8 +782,6 @@ StmtId parse_type(Parser* p) {
         ret_id = parse_type(p);
       }
 
-      // TypeAnnFunc func = { params, ret_id };
-      // t = (TypeAnn) { TypeAnnKindFunc, .func = func };
       t = new_func(params, ret_id);
     } break;
 
@@ -797,8 +793,9 @@ StmtId parse_type(Parser* p) {
   return parser_push_type(p, t);
 }
 
-StmtId parse_decl(Parser* p) {
-  Token* name = parser_eat(p);
+StmtId parse_decl(Parser* p, ExprId lhs) {
+  Token* name = parser_get_expr(p, lhs).ident;
+
   // eat ':='
   parser_eat(p);
   ExprId rhs = parse_expr(p, 0);
@@ -808,8 +805,8 @@ StmtId parse_decl(Parser* p) {
   return parser_push_stmt(p, stmt);
 }
 
-StmtId parse_decl_annot(Parser* p) {
-  Token* name = parser_eat(p);
+StmtId parse_decl_annot(Parser* p, ExprId lhs) {
+  Token* name = parser_get_expr(p, lhs).ident;
 
   // eat ':'
   parser_eat(p);
@@ -823,13 +820,12 @@ StmtId parse_decl_annot(Parser* p) {
   return parser_push_stmt(p, stmt);
 }
 
-StmtId parse_assign(Parser* p) {
-  Token* name = parser_eat(p);
+StmtId parse_assign(Parser* p, ExprId lhs) {
   // eat '='
   parser_eat(p);
   ExprId rhs = parse_expr(p, 0);
 
-  StmtAssign assign = (StmtAssign) {name, rhs};
+  StmtAssign assign = (StmtAssign) {lhs, rhs};
   Stmt stmt = (Stmt) { StmtKindAssign, .assign = assign };
   return parser_push_stmt(p, stmt);
 }
@@ -950,8 +946,6 @@ StmtId parse_func_decl(Parser* p) {
   StmtId block_id = parse_block(p);
 
   // build type
-  // TypeAnnFunc type = {params, ret_id};
-  // TypeId type_id = parser_push_type(p, (TypeAnn) { TypeAnnKindFunc, .func = type });
   TypeId type_id = parser_push_type(p, new_func(params, ret_id));
 
   StmtFnDecl func = { func_name, params_names, type_id, block_id };
@@ -998,8 +992,6 @@ StmtId parse_struct_decl(Parser* p) {
   }
 
   // build type
-  // TypeAnn type = {TypeAnnKindStruct, .strct = (TypeAnnStruct) {fields}};
-  // TypeId type_id = parser_push_type(p, type);
   TypeId type_id = parser_push_type(p, new_struct(fields));
 
   StmtStructDecl strct = {struct_name, type_id};
@@ -1014,6 +1006,7 @@ StmtId parse_struct_decl(Parser* p) {
 StmtId parse_stmt(Parser* p) {
   // we are safe
   if (p->is_panicking) parser_eat_until_safe(p);
+  if (parser_is_at_end(p)) return -1;
 
   int stmt = -1;
   switch(parser_peek(p)->kind) {
@@ -1024,27 +1017,36 @@ StmtId parse_stmt(Parser* p) {
     case TokFn: stmt = parse_func_decl(p); break;
     case TokStruct: stmt = parse_struct_decl(p); break;
     case TokReturn: stmt = parse_return(p); break;
+    case TokIdent: {
+      ExprId lhs = parse_expr(p, 0);
 
-    default: {
-      bool is_ident = parser_peek(p)->kind == TokIdent; 
-
-      Token* next = parser_peek_nth(p, 1);
-      if (is_ident && next->kind == TokAssign)
-        stmt = parse_assign(p);
-      else if (is_ident && next->kind == TokDecl)
-        stmt = parse_decl(p);
-      else if (is_ident && next->kind == TokColon)
-        stmt = parse_decl_annot(p);
-      else {
+      Token* op = parser_peek(p);
+      if (op->kind == TokAssign) {
+        stmt = parse_assign(p, lhs);
+      } else if (op->kind == TokDecl) {
+        // TODO: expression statements can't start with an identifier anymore
+        stmt = parse_decl(p, lhs);
+      } else if (op->kind == TokColon) {
+        stmt = parse_decl_annot(p, lhs);
+      } else {
         // expression
-        int id = parse_expr(p, 0);
-
-        if (id == -1) {
+        if (lhs == -1) {
           parse_log_err(p, "something wrong while parsing expression");
           return -1;
         }
-        stmt = parser_push_stmt(p, (Stmt) {StmtKindExpr, .expr_id = id});
+        stmt = parser_push_stmt(p, (Stmt) {StmtKindExpr, .expr_id = lhs});
       }
+    } break;
+
+    default: {
+      // expression
+      int id = parse_expr(p, 0);
+
+      if (id == -1) {
+        parse_log_err(p, "something wrong while parsing expression");
+        return -1;
+      }
+      stmt = parser_push_stmt(p, (Stmt) {StmtKindExpr, .expr_id = id});
     } break;
   }
 
